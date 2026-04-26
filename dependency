@@ -1,0 +1,7 @@
+sudo mkdir -p /etc/systemd/system/bluetooth.service.d
+
+printf '[Service]\nExecStart=\nExecStart=/usr/libexec/bluetooth/bluetoothd --compat\n' \
+    | sudo tee /etc/systemd/system/bluetooth.service.d/compat.conf
+
+sudo systemctl daemon-reload && sudo systemctl restart bluetooth
+

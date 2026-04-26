@@ -1,0 +1,22 @@
+# BSH Linux — Python dependencies
+# Install with:  pip install -r requirements.txt
+
+# ── Core cryptography (required) ─────────────────────────────────────────────
+cryptography>=41.0
+
+# ── Optional: SDP advertisement via BlueZ ────────────────────────────────────
+# Allows Bluetooth clients to discover the BSH service automatically.
+# Without this, clients must connect using the channel number directly.
+# Install PyBluez from source on modern kernels:
+#   sudo apt install libbluetooth-dev
+#   pip install git+https://github.com/pybluez/pybluez.git
+# OR use the pre-built wheel for your distro:
+#   pip install PyBluez
+PyBluez>=0.22; sys_platform == "linux"
+
+# ── Optional: PAM authentication ─────────────────────────────────────────────
+# Allows BSH to authenticate Linux system users via PAM (like OpenSSH).
+# Without this, BSH falls back to /etc/shadow (requires root + spwd module).
+#   sudo apt install libpam0g-dev
+#   pip install python-pam
+python-pam>=2.0.2; sys_platform == "linux"

@@ -1,0 +1,27 @@
+[Unit]
+Description=BSH Bluetooth Shell Service
+Documentation=https://github.com/your-org/openbsh
+After=network.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+# bsh_service.py _run is the internal daemon entry point
+ExecStart=/usr/bin/python3 /opt/bsh/bsh_service.py _run
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bsh
+
+# BSH requires root for user impersonation (identical to sshd)
+User=root
+Group=root
+
+# Filesystem hardening
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/bsh /var/log/bsh /run/bsh
+
+[Install]
+WantedBy=multi-user.target
