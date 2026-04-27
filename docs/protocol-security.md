@@ -68,9 +68,7 @@ The protocol defines the following core message types:
 | `0x03` | `MSG_KEEPALIVE` | Keepalive packet. |
 | `0x07` | `MSG_AUTH_SUCCESS` | Server sends authentication success and the AES session key. |
 | `0x08` | `MSG_AUTH_FAILURE` | Server sends an authentication or protocol error. |
-| `0x09` | `MSG_AUTH_PASSWORD_REQUEST` | Client begins password authentication. |
-| `0x0A` | `MSG_AUTH_PASSWORD_CHALLENGE` | Server sends a random challenge. |
-| `0x0B` | `MSG_AUTH_PASSWORD_RESPONSE` | Client sends the password-auth response payload. |
+| `0x09` | `MSG_AUTH_LOGIN` | Client sends username and plaintext password for authentication. |
 | `0x10` | `MSG_DATA_IN` | Client sends shell input. |
 | `0x11` | `MSG_DATA_OUT` | Server sends shell stdout. |
 | `0x12` | `MSG_DATA_ERR` | Server sends shell stderr. |
@@ -81,23 +79,11 @@ The protocol defines the following core message types:
 
 ## The Authentication Flow
 
-The current wire protocol always performs a challenge step, but the stock clients do not use that challenge to construct an HMAC proof. They prompt for a password and send:
+The current wire protocol performs a simplified, single-step authentication. The client prompts for a password and sends a single `MSG_AUTH_LOGIN` packet containing a JSON payload:
 
 ```json
-{"password": "<plaintext>"}
+{"username": "<name>", "password": "<plaintext>"}
 ```
-
-inside `MSG_AUTH_PASSWORD_RESPONSE`.
-
-### What The Challenge Does Today
-
-- Every server currently sends `MSG_AUTH_PASSWORD_CHALLENGE` with only a `challenge` field.
-- No server currently sends the per-user PBKDF2 salt in that packet.
-- Both `bsh_password.py` implementations contain helper code for HMAC proof generation and verification.
-- The stock Linux and Windows clients do not call those helpers.
-- Because the salt never travels over the wire, a stock client cannot derive the proof from the protocol alone.
-
-In other words, the current challenge packet adds a freshness token to the exchange, but it is not enough by itself to enable the password-proof path for stock clients.
 
 ### Server-Side Authentication Split
 
@@ -110,27 +96,25 @@ The important behavioral difference is not the client OS, but the server OS:
 
 ### Practical Consequence
 
-- **All stock client pairings use plaintext password submission inside `MSG_AUTH_PASSWORD_RESPONSE`.**
-- **The HMAC proof path exists in helper code, but it is not reachable through the current stock client workflow.**
+- **All stock client pairings use plaintext password submission inside `MSG_AUTH_LOGIN`.**
 - **Windows server authentication is stricter in practice because token creation still requires Windows password verification after any BSH-database check.**
 
-Important: the current client/server implementation does not perform an extra Diffie-Hellman or RSA exchange before OS authentication. The password is sent in the `MSG_AUTH_PASSWORD_RESPONSE` payload before the AES session key becomes active. The surrounding Bluetooth pairing and transport behavior therefore matter to the threat model.
+Important: the current client/server implementation does not perform an extra Diffie-Hellman or RSA exchange before OS authentication. The password is sent in the `MSG_AUTH_LOGIN` payload before the AES session key becomes active. The surrounding Bluetooth pairing and transport behavior therefore matter to the threat model.
 
 ---
 
-## Pair-Specific Session Behavior
+## Dynamic Adaptive Session Behavior
 
-The packet framing, message IDs, challenge step, and AES-GCM payload format are shared across all supported client/server combinations. The practical differences appear after `MSG_HELLO`, when the peers decide how to handle terminal editing, resize packets, and shell I/O.
+The packet framing, message IDs, challenge step, and AES-GCM payload format are shared across all supported client/server combinations. The practical differences appear after `MSG_HELLO`, when the clients dynamically detect the server's `os` and adapt their input handling model for terminal editing, resize packets, and shell I/O.
 
 ### Shared Behavior Across All Four Pairs
 
 - The server sends `MSG_HELLO` first and the client replies with its own `MSG_HELLO`.
-- The client hello includes `name`, `version`, `auth_method`, and `username`.
-- The current clients only use `auth_method = "password"`.
-- The server then expects `MSG_AUTH_PASSWORD_REQUEST`, returns `MSG_AUTH_PASSWORD_CHALLENGE` with only a random `challenge`, accepts `MSG_AUTH_PASSWORD_RESPONSE`, and finally sends `MSG_AUTH_SUCCESS` with the session key.
+- The client hello includes `name` and `version`.
+- The server then expects `MSG_AUTH_LOGIN` with the `username` and `password`.
+- The server accepts `MSG_AUTH_LOGIN`, and if successful, sends `MSG_AUTH_SUCCESS` with the session key.
 - After `MSG_AUTH_SUCCESS`, both sides encrypt packet payloads with AES-256-GCM.
 - `MSG_KEEPALIVE`, `MSG_INTERRUPT`, and `MSG_DISCONNECT` are valid on every path.
-- The stock clients send plaintext password JSON in `MSG_AUTH_PASSWORD_RESPONSE`; they do not send `proof`.
 
 ### Windows Client -> Windows Server
 
@@ -140,11 +124,8 @@ sequenceDiagram
     participant WS as Windows Server
 
     WS->>WC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
-    WC->>WS: MSG_HELLO {"name":"BSH-Windows-Client","auth_method":"password","username":"alice"}
-    WC->>WS: MSG_AUTH_PASSWORD_REQUEST {}
-    WS->>WC: MSG_AUTH_PASSWORD_CHALLENGE {"challenge":"<hex>"}
-    Note over WS,WC: No salt is sent
-    WC->>WS: MSG_AUTH_PASSWORD_RESPONSE {"password":"<plaintext>"}
+    WC->>WS: MSG_HELLO {"name":"BSH-Windows-Client"}
+    WC->>WS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
     Note over WS: Optional BSH DB check may run first
     Note over WS: Server still calls LogonUserW(mapped_user, password)
     WS->>WC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
@@ -190,11 +171,8 @@ sequenceDiagram
     participant LS as Linux Server
 
     LS->>WC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
-    WC->>LS: MSG_HELLO {"name":"BSH-Windows-Client","auth_method":"password","username":"alice"}
-    WC->>LS: MSG_AUTH_PASSWORD_REQUEST {}
-    LS->>WC: MSG_AUTH_PASSWORD_CHALLENGE {"challenge":"<hex>"}
-    Note over LS,WC: No salt is sent
-    WC->>LS: MSG_AUTH_PASSWORD_RESPONSE {"password":"<plaintext>"}
+    WC->>LS: MSG_HELLO {"name":"BSH-Windows-Client"}
+    WC->>LS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
     alt username exists in BSH DB
         Note over LS: Verify BSH DB password only, then map to system user
         Note over LS: Check mapped OS user exists
@@ -240,11 +218,8 @@ sequenceDiagram
     participant WS as Windows Server
 
     WS->>LC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
-    LC->>WS: MSG_HELLO {"name":"BSH-Linux-Client","auth_method":"password","username":"alice"}
-    LC->>WS: MSG_AUTH_PASSWORD_REQUEST {}
-    WS->>LC: MSG_AUTH_PASSWORD_CHALLENGE {"challenge":"<hex>"}
-    Note over WS,LC: No salt is sent
-    LC->>WS: MSG_AUTH_PASSWORD_RESPONSE {"password":"<plaintext>"}
+    LC->>WS: MSG_HELLO {"name":"BSH-Linux-Client"}
+    LC->>WS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
     Note over WS: Optional BSH DB check may run first
     Note over WS: Server still calls LogonUserW(mapped_user, password)
     WS->>LC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
@@ -288,11 +263,8 @@ sequenceDiagram
     participant LS as Linux Server
 
     LS->>LC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
-    LC->>LS: MSG_HELLO {"name":"BSH-Linux-Client","auth_method":"password","username":"alice"}
-    LC->>LS: MSG_AUTH_PASSWORD_REQUEST {}
-    LS->>LC: MSG_AUTH_PASSWORD_CHALLENGE {"challenge":"<hex>"}
-    Note over LS,LC: No salt is sent
-    LC->>LS: MSG_AUTH_PASSWORD_RESPONSE {"password":"<plaintext>"}
+    LC->>LS: MSG_HELLO {"name":"BSH-Linux-Client"}
+    LC->>LS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
     alt username exists in BSH DB
         Note over LS: Verify BSH DB password only, then map to system user
         Note over LS: Check mapped OS user exists
@@ -332,7 +304,7 @@ flowchart LR
 
 ### Compatibility Matrix
 
-| Pair | Auth Response Sent By Stock Client | Server-Side Auth Reality | Remote Shell Model | `MSG_WINDOW_SIZE` | Notes |
+| Pair | Auth Payload Sent By Stock Client | Server-Side Auth Reality | Remote Shell Model | `MSG_WINDOW_SIZE` | Notes |
 |---|---|---|---|---|---|
 | Windows client -> Windows server | `{"password":"<plaintext>"}` | Optional BSH DB check plus mandatory `LogonUserW` token acquisition | `cmd.exe` via pipes | Sent, ignored | No salt on wire; proof path not usable by stock client |
 | Windows client -> Linux server | `{"password":"<plaintext>"}` | BSH DB check or PAM/shadow fallback | Linux PTY | Sent, applied | Linux could verify proof, but stock client cannot compute one from the protocol |

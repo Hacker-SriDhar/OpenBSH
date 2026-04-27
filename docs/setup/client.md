@@ -95,9 +95,9 @@ python3 bsh_client_linux.py user@00:11:22:33:44:55 -p 3
 
 ---
 
-## Pair-Specific Client Behavior
+## Dynamic Adaptive Client Behavior
 
-The same client binary can connect to both server platforms, but it does not behave identically in all four pairings.
+The same client binary can connect to both server platforms. It uses dynamic OS detection (via the `os` field in `MSG_HELLO`) to seamlessly adapt its terminal input model to the remote shell backend.
 
 ### Windows Client
 

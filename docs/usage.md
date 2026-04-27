@@ -118,9 +118,9 @@ The client will automatically handle:
 
 To exit the session, simply type `exit` in the shell or press `Ctrl+C`.
 
-### What Changes By Pair
+### Dynamic Adaptation By Pair
 
-The command you run is the same, but the interactive behavior depends strongly on both the client OS and the server OS.
+The command you run is the same, but the interactive behavior depends strongly on the dynamic adaptation between the client OS and the server OS. The clients automatically adjust their input model based on the server's backend shell.
 
 | Pair | What You Will Notice |
 |---|---|

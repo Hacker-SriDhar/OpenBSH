@@ -513,15 +513,15 @@ Windows implementation uses token-based impersonation:
 
 #### 5.4.1 Platform-Specific Considerations
 
+OpenBSH clients implement a dynamic, dual-mode architecture that adapts its terminal input model based on the target server's operating system (advertised in the `MSG_HELLO` payload).
+
 **Linux Client**:
-- Uses standard library `socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)`
-- Disables local terminal echo for Linux servers (`termios.tcsetattr`)
-- Full raw terminal mode for PTY compatibility
+- **To Linux Server (Native PTY):** Operates in pure raw terminal mode (`termios.tcsetattr`), forwarding every keystroke character-by-character. The remote Linux PTY line discipline handles canonical editing, backspace, and echo natively, behaving identically to an SSH session.
+- **To Windows Server (Pipe-based):** Falls back to a Windows-specific local editing path. The client intercepts control keys (like arrow keys, Home, End, Del) and maintains a local line buffer and command history, sending the entire line only when Enter is pressed.
 
 **Windows Client**:
-- Uses the native Windows Bluetooth socket stack and SDP query APIs
-- Implements local echo suppression for Linux server connections
-- Uses `msvcrt` for non-blocking keyboard input
+- **To Windows Server (Pipe-based):** Uses local line-buffered editing with command history. ANSI escape codes are used to implement local cursor movement and line redrawing, because the remote pipe-based shell does not support native PTY echo.
+- **To Linux Server (Native PTY):** Disables local echo and forwards keystrokes. It relies on the remote Linux PTY to echo characters back via `MSG_DATA_OUT` to prevent double-echoing.
 
 #### 5.4.2 Connection Flow
 
@@ -535,26 +535,27 @@ class BSHClient:
         
         # 2. Exchange HELLO messages
         self.send_hello()
-        self.receive_hello()
+        server_hello = self.receive_hello()
+        server_os = server_hello.get("os", "unknown")
         
         # 3. Perform authentication
-        self.send_auth_request(username)
-        challenge = self.receive_challenge()
         password = getpass.getpass("Password: ")
-        self.send_auth_response(password)
+        self.send_auth_login(username, password)
         auth_result = self.receive_auth_result()
         
         if auth_result.success:
-            # 4. Extract session key returned by the server
             self.session_key = auth_result.session_key
-            
-            # 5. Enter encrypted interactive mode
-            self.interactive_session()
+            # Enter encrypted interactive mode
+            self.interactive_session(server_os)
         
-    def interactive_session(self):
-        # Terminal setup
+    def interactive_session(self, server_os):
+        # 4. Adaptive Terminal setup
         if server_os == "Linux":
-            disable_local_echo()
+            # Remote PTY handles echo and line discipline
+            setup_raw_forwarding_mode()
+        elif server_os == "Windows":
+            # Client maintains local history and line-buffering
+            setup_local_line_editing_mode()
         
         # Main I/O loop
         while True:
@@ -563,6 +564,17 @@ class BSHClient:
             # Receive server output → MSG_DATA_OUT/ERR
             # Handle window resize → MSG_WINDOW_SIZE
 ```
+
+#### 5.4.3 Cross-Platform Compatibility Matrix
+
+Because the servers use fundamentally different shell backends (PTY vs. pipe-based `cmd.exe`), the interactive experience shifts across the four distinct client/server pairings:
+
+| Pair | Server OS Field | Actual Shell Backend | Editing Authority | `MSG_WINDOW_SIZE` Handling |
+|---|---|---|---|---|
+| Windows Client -> Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
+| Windows Client -> Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY (`TIOCSWINSZ`) |
+| Linux Client -> Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
+| Linux Client -> Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY (`TIOCSWINSZ`) |
 
 ### 5.5 Error Handling and Robustness
 

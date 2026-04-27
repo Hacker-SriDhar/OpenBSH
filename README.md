@@ -10,7 +10,7 @@
 - **Enterprise-Grade Security:** All post-authentication traffic is encrypted using **AES-256-GCM** with a fresh random 32-byte session key for each session.
 - **Native OS Authentication:** Authenticates against Windows local accounts via `LogonUserW`, or Linux PAM with `/etc/shadow` fallback when applicable.
 - **SSH-Style PTY Experience:** Enjoy an interactive shell experience with pseudo-terminal (PTY) emulation, supporting standard shell utilities (like `vim`, `nano`, `htop`), command history, and continuous output.
-- **Zero-Install Client:** Lightweight, portable Python clients for both Windows and Linux.
+- **Dynamic Adaptive Clients:** Lightweight Python clients for Windows and Linux automatically detect the server OS and seamlessly switch between raw PTY pass-through and a local line-buffered history editor for optimal interactivity.
 
 ---
 

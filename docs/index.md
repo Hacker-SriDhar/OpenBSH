@@ -13,6 +13,7 @@ In many secure or edge environments, traditional IP networks (Wi-Fi, Ethernet) m
 - **Cross-Platform Support:** Fully functional server implementations for both **Windows** (as a Windows Service) and **Linux** (as a Systemd Daemon), along with cross-platform Python clients.
 - **Enterprise-Grade Security:** All post-authentication traffic is encrypted using **AES-256-GCM** with a fresh random session key per connection. Standalone passwords are stored with PBKDF2-HMAC-SHA256.
 - **SSH-Style PTY Experience:** Enjoy an interactive shell experience with pseudo-terminal (PTY) emulation, supporting standard shell utilities, command history, and continuous output.
+- **Dynamic Adaptive Clients:** The clients auto-detect the target server OS (`Linux` or `Windows`) and seamlessly switch their input handling model between pure raw PTY pass-through and a local line-buffered history editor for optimal interactivity.
 - **Native OS Integration:** 
     - **Windows:** Integrates with `win32serviceutil`, uses `CreateProcessAsUser` for shell impersonation, and authenticates with `LogonUserW`.
     - **Linux:** Integrates with Systemd, uses `pty.openpty` for terminal emulation, and supports PAM authentication with `/etc/shadow` fallback.

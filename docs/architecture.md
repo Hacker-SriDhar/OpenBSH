@@ -76,9 +76,7 @@ sequenceDiagram
     C->>S: MSG_HELLO (Client Info)
     S->>C: MSG_HELLO (Server Info, Auth Methods)
     
-    C->>S: MSG_AUTH_PASSWORD_REQUEST (Username)
-    S->>C: MSG_AUTH_PASSWORD_CHALLENGE (32-byte Challenge)
-    C->>S: MSG_AUTH_PASSWORD_RESPONSE (JSON payload with password)
+    C->>S: MSG_AUTH_LOGIN (JSON payload with username & password)
     
     Note over S: Server verifies the password against<br/>the BSH password DB or native OS auth
     
@@ -90,14 +88,14 @@ sequenceDiagram
 ```
 
 1. **Hello Exchange:** Both sides advertise their version and OS capabilities. This is critical for clients to adjust their terminal emulation (e.g., disabling local echo if the server is Linux).
-2. **Password Exchange:** The server sends a random challenge, then expects `MSG_AUTH_PASSWORD_RESPONSE`. In the current client implementation, that response carries the plaintext password inside the BSH packet payload.
+2. **Password Exchange:** The client sends a single `MSG_AUTH_LOGIN` packet carrying the username and plaintext password inside the BSH packet payload.
 3. **Session Key Negotiation:** If authentication succeeds, the server generates a random AES-256 session key and sends it to the client. From this moment, subsequent packet payloads are encrypted.
 
 ---
 
-## Cross-Platform Pair Matrix
+## Cross-Platform Pair Matrix (Dynamic Client Adaptation)
 
-OpenBSH uses one shared packet protocol, but the runtime behavior is not identical across all client/server pairings. The most important differences are in RFCOMM discovery, terminal editing, and whether `MSG_WINDOW_SIZE` changes an actual PTY.
+OpenBSH uses one shared packet protocol, but the clients employ a **dynamic adaptive architecture**. The runtime behavior shifts based on the target server's operating system (advertised via the `os` field in `MSG_HELLO`). The clients seamlessly transition between raw PTY pass-through and local line-buffered history modes. The most important differences are in RFCOMM discovery, terminal editing, and whether `MSG_WINDOW_SIZE` changes an actual PTY.
 
 | Pair | RFCOMM Discovery Path | Server `os` Value | Actual Shell Backend | Editing Authority | Resize Handling |
 |---|---|---|---|---|---|
