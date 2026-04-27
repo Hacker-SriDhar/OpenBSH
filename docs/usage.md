@@ -31,8 +31,8 @@ The OpenBSH daemon runs in the background. Depending on your operating system, y
 OpenBSH supports two primary modes of authentication:
 
 1. **Native OS Authentication (Default):**
-    - On Windows, OpenBSH uses the `LogonUserW` API to authenticate against the local SAM or Active Directory. You simply log in with your Windows password.
-    - On Linux, OpenBSH uses PAM (`python-pam`) to authenticate against the system's `/etc/shadow` file. You log in with your Linux password.
+    - On Windows, OpenBSH uses the `LogonUserW` API to verify the target Windows account password.
+    - On Linux, OpenBSH uses PAM when available and falls back to `/etc/shadow`-based verification when running with sufficient privileges.
 
 2. **Standalone BSH Database:**
     - OpenBSH ships with its own highly secure, standalone password database (`bsh_password.py`). 
@@ -96,7 +96,7 @@ python3 bsh_client_linux.py johndoe@00:11:22:33:44:55
 ```
 
 ### Custom Channels
-By default, OpenBSH advertises and listens on RFCOMM Channel 1. If you configured the server to listen on a different channel (via `config.json` on Linux or the Registry on Windows), specify it during connection:
+Linux defaults to channel `1`, but the active RFCOMM channel may differ if you reconfigure it or if the platform assigns a different bound channel. If needed, specify the channel explicitly during connection:
 
 **From Windows:**
 ```powershell

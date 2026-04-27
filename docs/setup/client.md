@@ -10,7 +10,7 @@ The client requires a Python 3 environment and a Bluetooth adapter. It runs nati
 
 ### Install Dependencies
 
-Whether you are on Windows or Linux, install the `cryptography` package via `pip`. If you are on Linux, you will also need the `PyBluez` package to discover and bind to RFCOMM sockets.
+Whether you are on Windows or Linux, install the `cryptography` package via `pip`. On Linux, the client uses the Python standard library Bluetooth socket support for RFCOMM connections. `PyBluez` is optional and only helps with SDP-based channel discovery.
 
 === "Windows"
     ```powershell
@@ -20,7 +20,7 @@ Whether you are on Windows or Linux, install the `cryptography` package via `pip
 === "Linux"
     ```bash
     sudo apt install libbluetooth-dev
-    pip3 install cryptography PyBluez
+    pip3 install cryptography
     ```
 
 ---
@@ -35,7 +35,7 @@ There is no formal installation process for the client. The client is a standalo
 ### Project Structure
 ```text
 Client/
-├── bsh_client.py           # The universal entry point
+├── bsh_client.py           # Shared client implementation
 ├── bsh_client_windows.py   # Windows-specific client logic
 ├── bsh_client_linux.py     # Linux-specific client logic
 ├── bsh_protocol.py         # The shared wire protocol
@@ -50,7 +50,7 @@ To connect to a server, you only need the target username and the Bluetooth MAC 
 
 ### Finding the Server MAC Address
 
-If you don't know the MAC address of the target server, you can pair the devices natively using your OS's Bluetooth manager, or use command-line discovery tools.
+If you don't know the MAC address of the target server, pairing the devices through the OS Bluetooth settings is usually the most reliable path. Command-line tools can also help, depending on platform support.
 
 **On the Server (Linux):**
 ```bash
@@ -60,8 +60,8 @@ hciconfig -a
 
 **On the Server (Windows):**
 ```powershell
-ipconfig /all
-# Look for the "Bluetooth Network Connection" Physical Address
+Get-PnpDevice -Class Bluetooth
+# Then inspect the adapter in Device Manager or Windows Bluetooth settings
 ```
 
 ### Connecting to the Server

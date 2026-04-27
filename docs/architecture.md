@@ -17,7 +17,7 @@ graph TD
     end
 
     subgraph RFCOMM Bluetooth Link
-        BT((Bluetooth\nAES-256 Encrypted))
+        BT((Bluetooth RFCOMM\nPost-auth AES-256-GCM))
     end
 
     subgraph Server System
@@ -44,7 +44,7 @@ graph TD
 OpenBSH relies on several key Python modules. To ensure maximum compatibility between Windows and Linux, the cryptographic and protocol logic is completely identical across platforms.
 
 ### 1. `bsh_protocol.py` (The Wire Protocol)
-This file defines the strict packet structure used to communicate over Bluetooth. Because Bluetooth RFCOMM provides a reliable stream (similar to TCP), `bsh_protocol.py` handles framing: defining the Start of Frame (`0xAA`), message types (e.g., `MSG_HELLO`, `MSG_SHELL_INPUT`), payloads, and checksum validation.
+This file defines the strict packet structure used to communicate over Bluetooth. Because Bluetooth RFCOMM provides a reliable stream (similar to TCP), `bsh_protocol.py` handles framing: defining the Start of Frame (`0xAA`), message types (e.g., `MSG_HELLO`, `MSG_DATA_IN`), payloads, and checksum validation.
 
 ### 2. `bsh_crypto.py` (The Security Layer)
 Once the server and client mutually authenticate, `bsh_crypto.py` is engaged. It implements **AES-256-GCM** encryption. All subsequent shell traffic is encrypted and authenticated. The GCM (Galois/Counter Mode) tag ensures that any tampering with the packet over the air is instantly detected and the connection is dropped.
@@ -54,7 +54,7 @@ While the protocol is identical, interacting with the operating system requires 
 
 #### **Windows Service (`bsh_server_service.py` & `bsh_service.py`)**
 - **Service Management:** Uses `win32serviceutil` to run seamlessly in the background as a native Windows service.
-- **Authentication:** Uses Windows `LogonUserW` (via `ctypes`) to validate user credentials against the local SAM or Active Directory domain.
+- **Authentication:** Uses Windows `LogonUserW` (via `ctypes`) to validate credentials for the target Windows account.
 - **Impersonation:** Uses `CreateProcessAsUser` to spawn `cmd.exe` or `powershell.exe` securely under the authenticated user's context.
 
 #### **Linux Daemon (`bsh_server_service.py` & `bsh_service.py`)**
@@ -66,7 +66,7 @@ While the protocol is identical, interacting with the operating system requires 
 
 ## Authentication Mechanism
 
-To prevent brute force and ensure secure key exchange, OpenBSH uses a challenge-response authentication mechanism.
+OpenBSH performs a two-step password authentication exchange followed by session key establishment.
 
 ```mermaid
 sequenceDiagram
@@ -77,22 +77,18 @@ sequenceDiagram
     S->>C: MSG_HELLO (Server Info, Auth Methods)
     
     C->>S: MSG_AUTH_PASSWORD_REQUEST (Username)
-    S->>C: MSG_AUTH_PASSWORD_CHALLENGE (32-byte Nonce)
+    S->>C: MSG_AUTH_PASSWORD_CHALLENGE (32-byte Challenge)
+    C->>S: MSG_AUTH_PASSWORD_RESPONSE (JSON payload with password)
     
-    Note over C: Client hashes password<br/>via PBKDF2
-    Note over C: Client computes HMAC<br/>of Nonce using Hash
-    
-    C->>S: MSG_AUTH_PASSWORD_RESPONSE (HMAC Proof)
-    
-    Note over S: Server verifies HMAC<br/>(or checks OS auth)
+    Note over S: Server verifies the password against<br/>the BSH password DB or native OS auth
     
     S->>C: MSG_AUTH_SUCCESS (Session Key)
     
     Note over C, S: Connection switches to AES-256-GCM
-    C->>S: MSG_SHELL_INPUT (Encrypted)
-    S->>C: MSG_SHELL_OUTPUT (Encrypted)
+    C->>S: MSG_DATA_IN (Encrypted)
+    S->>C: MSG_DATA_OUT (Encrypted)
 ```
 
 1. **Hello Exchange:** Both sides advertise their version and OS capabilities. This is critical for clients to adjust their terminal emulation (e.g., disabling local echo if the server is Linux).
-2. **Challenge/Response:** The server sends a random 32-byte nonce. The client must prove it knows the password by returning an HMAC of the nonce.
-3. **Session Key Negotiation:** If the proof is valid, the server generates a random AES-256 session key and sends it to the client. From this moment, the socket is encrypted.
+2. **Password Exchange:** The server sends a random challenge, then expects `MSG_AUTH_PASSWORD_RESPONSE`. In the current client implementation, that response carries the plaintext password inside the BSH packet payload.
+3. **Session Key Negotiation:** If authentication succeeds, the server generates a random AES-256 session key and sends it to the client. From this moment, subsequent packet payloads are encrypted.

@@ -1,4 +1,4 @@
-# OpenBSH:  Bluetooth Shell
+# OpenBSH: Bluetooth Shell
 
 Welcome to the official documentation for **OpenBSH** — a robust, cross-platform Bluetooth Shell service. 
 
@@ -11,10 +11,10 @@ In many secure or edge environments, traditional IP networks (Wi-Fi, Ethernet) m
 ### Key Features
 
 - **Cross-Platform Support:** Fully functional server implementations for both **Windows** (as a Windows Service) and **Linux** (as a Systemd Daemon), along with cross-platform Python clients.
-- **Enterprise-Grade Security:** All traffic is encrypted using **AES-256-GCM** with keys derived via PBKDF2 HMAC-SHA256. Secure authentication prevents unauthorized access.
+- **Enterprise-Grade Security:** All post-authentication traffic is encrypted using **AES-256-GCM** with a fresh random session key per connection. Standalone passwords are stored with PBKDF2-HMAC-SHA256.
 - **SSH-Style PTY Experience:** Enjoy an interactive shell experience with pseudo-terminal (PTY) emulation, supporting standard shell utilities, command history, and continuous output.
 - **Native OS Integration:** 
-    - **Windows:** Integrates with `win32serviceutil`, uses `CreateProcessAsUser` for shell impersonation, and authenticates against Windows SAM.
+    - **Windows:** Integrates with `win32serviceutil`, uses `CreateProcessAsUser` for shell impersonation, and authenticates with `LogonUserW`.
     - **Linux:** Integrates with Systemd, uses `pty.openpty` for terminal emulation, and supports PAM authentication with `/etc/shadow` fallback.
 
 ## Documentation Structure

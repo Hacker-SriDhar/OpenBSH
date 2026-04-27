@@ -1,6 +1,6 @@
 # Windows Server Setup
 
-The OpenBSH Server on Windows is designed to run seamlessly as a background Windows Service. It hooks directly into the Windows security model (SAM/Active Directory) to authenticate users and spawn restricted shell sessions (`cmd.exe` or `powershell.exe`).
+The OpenBSH Server on Windows is designed to run seamlessly as a background Windows Service. It hooks directly into the Windows security model to authenticate users and spawn restricted shell sessions.
 
 ## Prerequisites
 
@@ -70,16 +70,13 @@ net stop BSHService
 
 ## User Authentication
 
-On Windows, OpenBSH natively hooks into the local SAM (Security Account Manager) or the Active Directory Domain via `LogonUserW`. 
+On Windows, OpenBSH uses `LogonUserW` to validate the supplied credentials for the target Windows account.
 
 **You do not need to create standalone BSH users.** Any user who can log into the Windows machine locally can authenticate over BSH.
 
 To connect from a client, simply use your Windows username and password.
 
-```text
-Username: DOMAIN\Username  (or just Username for local accounts)
-Password: WindowsPassword
-```
+In practice, the current client flow is simplest when the username matches the Windows account name expected by the server configuration.
 
 ### The Standalone BSH Password DB (Optional)
 If you wish to use passwords independent of the Windows system, you can use the built-in password database. Similar to the Linux version, these users will still need to be mapped to a legitimate Windows system user.
@@ -93,6 +90,6 @@ python bsh_password.py adduser standalone_bsh_user
 ## File Locations & Logging
 
 - **Logs Location:** `C:\ProgramData\BSH\logs\`
-- **Configuration:** Runtime state and configurations are stored in the registry under the service profile or in `C:\ProgramData\BSH`.
+- **Configuration:** The default configuration file is `C:\ProgramData\BSH\config.json`, and runtime state is written under `C:\ProgramData\BSH`.
 
 If you experience connection failures, always check the latest log file in `C:\ProgramData\BSH\logs\`.

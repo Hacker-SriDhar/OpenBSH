@@ -63,7 +63,7 @@ sudo bash install.sh
 ```
 
 This will:
-- Install Python packages (`cryptography`, `python-pam`, `PyBluez`)
+- Install Python packages (`cryptography`, `python-pam`, `PyBluez` when available for SDP discovery/advertisement)
 - Copy BSH files to `/opt/bsh/`
 - Create `/var/lib/bsh/`, `/var/log/bsh/`, `/run/bsh/`, `/etc/bsh/`
 - Write a default `/etc/bsh/config.json`
@@ -87,8 +87,10 @@ systemctl status bsh
 ### 5. Connect from a client
 
 From any BSH-compatible client (Linux or Windows):
-```
-bsh connect <BT_MAC_ADDRESS> --channel 1
+```bash
+python3 bsh_client_linux.py alice@AA:BB:CC:DD:EE:FF
+# or
+python bsh_client_windows.py alice@AA:BB:CC:DD:EE:FF
 ```
 
 ---
@@ -151,14 +153,14 @@ Client                          Server
   │── MSG_HELLO ──────────────────►│  (username, auth_method=password)
   │◄── MSG_HELLO ──────────────────│  (name, version, features)
   │── MSG_AUTH_PASSWORD_REQUEST ──►│
-  │◄── MSG_AUTH_PASSWORD_CHALLENGE─│  (32-byte random nonce)
-  │── MSG_AUTH_PASSWORD_RESPONSE ─►│  (HMAC proof or plaintext password)
+  │◄── MSG_AUTH_PASSWORD_CHALLENGE─│  (32-byte random challenge)
+  │── MSG_AUTH_PASSWORD_RESPONSE ─►│  (current clients send password payload)
   │◄── MSG_AUTH_SUCCESS ───────────│  (AES-256-GCM session key)
   │═══════ Encrypted shell I/O ════│
 ```
 
 If the username is in the **BSH password DB** (`/var/lib/bsh/passwords`),
-authentication happens entirely against that DB (HMAC challenge-response).
+authentication happens against that DB.
 
 If the username is **not** in the BSH DB, the server tries **PAM**
 (`python-pam`) and, if unavailable, falls back to `/etc/shadow` directly.
@@ -182,7 +184,7 @@ If the username is **not** in the BSH DB, the server tries **PAM**
 
 | Problem | Solution |
 |---|---|
-| `ModuleNotFoundError: bluetooth` | PyBluez not installed — SDP is skipped but service still works |
+| `ModuleNotFoundError: bluetooth` | PyBluez not installed — SDP advertisement/discovery is reduced, but direct channel connections still work |
 | `RFCOMM bind failed` | BlueZ not running: `sudo systemctl start bluetooth` |
 | `PAM auth failed` | Install python-pam or run as root for shadow fallback |
 | `User not found` | Add user to BSH DB: `bsh_password.py adduser <name>` |
