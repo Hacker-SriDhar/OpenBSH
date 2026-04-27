@@ -151,9 +151,7 @@ Checksum = LengthHigh ⊕ LengthLow ⊕ Type ⊕ Payload[0] ⊕ ... ⊕ Payload[
 | 0x03 | MSG_KEEPALIVE | Bidirectional | Connection maintenance |
 | 0x07 | MSG_AUTH_SUCCESS | Server → Client | Authentication success + session key |
 | 0x08 | MSG_AUTH_FAILURE | Server → Client | Authentication failure |
-| 0x09 | MSG_AUTH_PASSWORD_REQUEST | Client → Server | Begin password auth |
-| 0x0A | MSG_AUTH_PASSWORD_CHALLENGE | Server → Client | Challenge nonce |
-| 0x0B | MSG_AUTH_PASSWORD_RESPONSE | Client → Server | Password response |
+| 0x09 | MSG_AUTH_LOGIN | Client → Server | Username and plaintext password |
 | 0x10 | MSG_DATA_IN | Client → Server | Shell input (encrypted) |
 | 0x11 | MSG_DATA_OUT | Server → Client | Shell output (encrypted) |
 | 0x12 | MSG_DATA_ERR | Server → Client | Shell error output (encrypted) |
@@ -209,14 +207,7 @@ Client                                    Server
   │─────── MSG_HELLO ─────────────────────→│
   │←────── MSG_HELLO ──────────────────────│
   │                                         │
-  │── MSG_AUTH_PASSWORD_REQUEST (user) ───→│
-  │                                         │
-  │                                         │ Generate
-  │                                         │ 32-byte nonce
-  │                                         │
-  │←─ MSG_AUTH_PASSWORD_CHALLENGE (nonce) ─│
-  │                                         │
-  │─ MSG_AUTH_PASSWORD_RESPONSE (password)→│
+  │── MSG_AUTH_LOGIN (user, password) ────→│
   │                                         │
   │                                         │ Verify password
   │                                         │ Generate session_key
@@ -250,7 +241,7 @@ OpenBSH supports two authentication modes:
 #### 3.5.1 Connection Lifecycle
 
 1. **Initial Handshake**: MSG_HELLO exchange (capabilities, OS detection)
-2. **Authentication**: Username request, server challenge, and password submission
+2. **Authentication**: Client sends MSG_AUTH_LOGIN with username and password
 3. **Encrypted Session**: All traffic protected by AES-256-GCM
 4. **Keepalive**: Periodic MSG_KEEPALIVE packets (every 500ms)
 5. **Termination**: MSG_DISCONNECT or connection timeout
@@ -303,9 +294,9 @@ We consider the following threat classes:
 
 **Analysis**: AES-256 is currently considered secure against all known attacks when properly implemented. The 256-bit key space (2^256 ≈ 1.16×10^77) makes brute force infeasible.
 
-**Limitation**: Pre-authentication messages (MSG_HELLO, MSG_AUTH_PASSWORD_REQUEST, MSG_AUTH_PASSWORD_CHALLENGE) are transmitted in plaintext. However, these contain no sensitive information beyond username and a random nonce.
+**Limitation**: Pre-authentication messages (MSG_HELLO) are transmitted in plaintext.
 
-**Critical Issue**: The password in MSG_AUTH_PASSWORD_RESPONSE is currently sent *before* session key establishment. This means the password traverses the Bluetooth link without application-layer encryption, relying solely on Bluetooth link-layer security.
+**Critical Issue**: The password in MSG_AUTH_LOGIN is currently sent *before* session key establishment. This means the password traverses the Bluetooth link without application-layer encryption, relying solely on Bluetooth link-layer security.
 
 **Mitigation**: Bluetooth pairing provides link-layer encryption. For maximum security, SSP (Secure Simple Pairing) should be used, which provides 128-bit equivalent security.
 
@@ -336,12 +327,11 @@ We consider the following threat classes:
 #### 4.2.5 Authentication Security
 
 **Strengths**:
-- Server-issued challenge values add freshness to the authentication exchange, but the current client still submits the password directly
 - PBKDF2 with 100,000 iterations makes password database attacks expensive
 - Integration with OS authentication leverages platform security features
 
 **Weaknesses**:
-- Password transmitted in MSG_AUTH_PASSWORD_RESPONSE before session key active
+- Password transmitted in MSG_AUTH_LOGIN before session key active
 - No protection against brute-force authentication attempts beyond Bluetooth pairing
 - No rate limiting at protocol level (relies on server implementation)
 
