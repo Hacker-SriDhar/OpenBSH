@@ -92,3 +92,34 @@ python3 bsh_client_linux.py user@00:11:22:33:44:55 -p 3
 
 > [!TIP]
 > The OpenBSH client provides a highly responsive PTY experience. If connecting to a Linux server, the client will automatically disable local terminal echo, relying entirely on the server's PTY to render keystrokes, ensuring that programs like `vim`, `nano`, and `htop` work flawlessly.
+
+---
+
+## Pair-Specific Client Behavior
+
+The same client binary can connect to both server platforms, but it does not behave identically in all four pairings.
+
+### Windows Client
+
+- **To Linux server:**
+  The client uses the remote Linux PTY as the source of truth for echo and line editing. Local echo is disabled, arrow keys and control sequences are forwarded, and `MSG_WINDOW_SIZE` changes are applied by the server.
+- **To Windows server:**
+  The client enables a local line editor with local echo and history because the remote Windows shell is pipe-based rather than PTY-based. `MSG_WINDOW_SIZE` packets are still sent, but the server ignores them.
+
+### Linux Client
+
+- **To Linux server:**
+  The client stays in raw terminal pass-through mode. Keystrokes are forwarded character-by-character and the Linux PTY handles canonical editing, full-screen apps, and resize events.
+- **To Windows server:**
+  The client still uses Linux raw terminal mode underneath, but it switches into a Windows-specific local editing path once the server reports `os = "Windows"`. Resize packets continue to be emitted, but the Windows server accepts them without applying a PTY resize.
+
+### RFCOMM Discovery Differences
+
+- **Windows client:**
+  Uses Windows SDP lookup first, then RFCOMM channel scan, then manual entry.
+- **Linux client:**
+  Uses PyBluez SDP lookup when available, then `sdptool`, then RFCOMM channel scan, then manual entry.
+
+### Hello/Feature Caveat
+
+Both server implementations currently advertise `features = ["pty", "signals", "password"]` during `MSG_HELLO`. That is accurate for the Linux server, but only partially accurate for the Windows server. In practice, clients should treat the remote `os` value as the main indicator of whether the session is PTY-backed.

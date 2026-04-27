@@ -59,7 +59,6 @@ DEFAULT_CONFIG = {
     'log_file':      '/var/log/bsh/bsh_service.log',
     'run_dir':       '/run/bsh',
     'pid_file':      '/run/bsh/bsh.pid',
-    'password_file': '/var/lib/bsh/passwords',
     'channel':       1,
     'log_level':     'DEBUG',
 }
@@ -188,7 +187,6 @@ def run_daemon(config: dict) -> int:
     logger.info("BSH Service starting (Linux daemon)")
     logger.info("PID            : %d", os.getpid())
     logger.info("Channel        : %d", config['channel'])
-    logger.info("Password file  : %s", config['password_file'])
     logger.info("Log file       : %s", config['log_file'])
     logger.info("Log level      : %s", config.get('log_level', 'DEBUG'))
     logger.info("=" * 60)
@@ -222,7 +220,6 @@ def run_daemon(config: dict) -> int:
     try:
         logger.info("Creating BSHHostService instance …")
         bsh_host = BSHHostService(
-            password_file=config['password_file'],
             channel=config['channel'],
         )
         logger.info("BSHHostService instance created")
@@ -314,8 +311,6 @@ def show_status() -> int:
 
     print()
     print("  Files:")
-    print(f"    Password file  : {config['password_file']}")
-    print(f"                     {file_status(config['password_file'])}")
     print(f"    Log file       : {config['log_file']}")
     print(f"                     {file_status(config['log_file'])}")
     print(f"    PID file       : {config['pid_file']}")
@@ -479,7 +474,6 @@ def _setup_environment(config: dict) -> None:
         default_config = {
             'channel':       config['channel'],
             'log_level':     'DEBUG',
-            'password_file': config['password_file'],
             'log_file':      config['log_file'],
         }
         with open(config_file, 'w', encoding='utf-8') as fh:
@@ -510,12 +504,11 @@ def _setup_environment(config: dict) -> None:
     print()
     exe = os.path.basename(sys.argv[0])
     print("Next steps:")
-    print(f"  1. Add a user     :  sudo python3 bsh_password.py adduser <username>")
-    print(f"  2. Start service  :  sudo python3 {exe} start")
+    print(f"  1. Start service  :  sudo python3 {exe} start")
     print(f"           — or —  :  sudo systemctl start {SERVICE_NAME}")
-    print(f"  3. Enable on boot :  sudo systemctl enable {SERVICE_NAME}")
-    print(f"  4. Check status   :  python3 {exe} status")
-    print(f"  5. View logs      :  python3 {exe} logs")
+    print(f"  2. Enable on boot :  sudo systemctl enable {SERVICE_NAME}")
+    print(f"  3. Check status   :  python3 {exe} status")
+    print(f"  4. View logs      :  python3 {exe} logs")
     print()
 
 

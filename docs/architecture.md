@@ -55,7 +55,7 @@ While the protocol is identical, interacting with the operating system requires 
 #### **Windows Service (`bsh_server_service.py` & `bsh_service.py`)**
 - **Service Management:** Uses `win32serviceutil` to run seamlessly in the background as a native Windows service.
 - **Authentication:** Uses Windows `LogonUserW` (via `ctypes`) to validate credentials for the target Windows account.
-- **Impersonation:** Uses `CreateProcessAsUser` to spawn `cmd.exe` or `powershell.exe` securely under the authenticated user's context.
+- **Impersonation:** Uses Windows token-based process creation to spawn the current pipe-based `cmd.exe` shell under the authenticated user's context.
 
 #### **Linux Daemon (`bsh_server_service.py` & `bsh_service.py`)**
 - **Service Management:** Wrapped in a native `systemd` unit (`bsh.service`).
@@ -92,3 +92,24 @@ sequenceDiagram
 1. **Hello Exchange:** Both sides advertise their version and OS capabilities. This is critical for clients to adjust their terminal emulation (e.g., disabling local echo if the server is Linux).
 2. **Password Exchange:** The server sends a random challenge, then expects `MSG_AUTH_PASSWORD_RESPONSE`. In the current client implementation, that response carries the plaintext password inside the BSH packet payload.
 3. **Session Key Negotiation:** If authentication succeeds, the server generates a random AES-256 session key and sends it to the client. From this moment, subsequent packet payloads are encrypted.
+
+---
+
+## Cross-Platform Pair Matrix
+
+OpenBSH uses one shared packet protocol, but the runtime behavior is not identical across all client/server pairings. The most important differences are in RFCOMM discovery, terminal editing, and whether `MSG_WINDOW_SIZE` changes an actual PTY.
+
+| Pair | RFCOMM Discovery Path | Server `os` Value | Actual Shell Backend | Editing Authority | Resize Handling |
+|---|---|---|---|---|---|
+| Windows client -> Windows server | Windows SDP -> channel scan -> manual | `Windows` | `cmd.exe` with pipes | Client-side line editor | Ignored by server |
+| Windows client -> Linux server | Windows SDP -> channel scan -> manual | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY |
+| Linux client -> Windows server | PyBluez SDP -> `sdptool` -> scan -> manual | `Windows` | `cmd.exe` with pipes | Linux client uses Windows-specific local editing path | Ignored by server |
+| Linux client -> Linux server | PyBluez SDP -> `sdptool` -> scan -> manual | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY |
+
+### Design Notes
+
+- Both servers currently advertise `features = ["pty", "signals", "password"]` in `MSG_HELLO`.
+- On Linux this matches reality because the session is backed by `pty.openpty()`.
+- On Windows this is only partially true:
+  `MSG_INTERRUPT` is supported, but the shell is pipe-based and `MSG_WINDOW_SIZE` is accepted without changing a real terminal.
+- Clients therefore key most of their interactive behavior off the remote `os` field rather than treating the `pty` feature flag as authoritative.

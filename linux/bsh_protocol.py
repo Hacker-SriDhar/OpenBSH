@@ -29,9 +29,7 @@ Packet wire format
 Authentication flows
 ────────────────────
   Password (client initiates):
-    Client → MSG_AUTH_PASSWORD_REQUEST   {}
-    Server → MSG_AUTH_PASSWORD_CHALLENGE {challenge_hex}
-    Client → MSG_AUTH_PASSWORD_RESPONSE  {password (plaintext inside BT link)}
+    Client → MSG_AUTH_LOGIN              {username, password (plaintext inside BT link)}
     Server → MSG_AUTH_SUCCESS            {status, username, session_key_hex}
           OR MSG_AUTH_FAILURE            {error}
 """
@@ -59,9 +57,7 @@ class MessageType(IntEnum):
     MSG_AUTH_FAILURE   = 0x08   # Server → Client: error message
 
     # ── Password authentication ──────────────────────────────
-    MSG_AUTH_PASSWORD_REQUEST   = 0x09  # Client → Server: "I want password auth"
-    MSG_AUTH_PASSWORD_CHALLENGE = 0x0A  # Server → Client: random challenge
-    MSG_AUTH_PASSWORD_RESPONSE  = 0x0B  # Client → Server: password (or HMAC proof)
+    MSG_AUTH_LOGIN     = 0x09   # Client → Server: username and plaintext password
 
     # ── Data streams ─────────────────────────────────────────
     MSG_DATA_IN  = 0x10   # Client → Server  (stdin)
@@ -150,149 +146,6 @@ class BSHPacket:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Authenticator
-# ─────────────────────────────────────────────────────────────────────────────
-
-class BSHAuthenticator:
-    """
-    Stateful authentication helper for a single BSH connection.
-
-    Both host-side and client-side methods are provided.
-    """
-
-    def __init__(self, crypto: BSHCrypto):
-        self.crypto           = crypto
-        self.authenticated    = False
-        self.client_id        = None
-        self.session_key: Optional[bytes] = None
-        self._pending_challenge: Optional[bytes] = None
-
-    # ═══════════════════════════════════════════
-    # ── Host side — Password auth ────────────────
-    # ═══════════════════════════════════════════
-
-    def handle_password_auth_request(self, packet: 'BSHPacket') -> 'BSHPacket':
-        """
-        Host: client wants password auth → issue a random challenge.
-
-        Returns:
-            MSG_AUTH_PASSWORD_CHALLENGE
-        """
-        self._pending_challenge = self.crypto.generate_challenge(32)
-        return BSHPacket(
-            MessageType.MSG_AUTH_PASSWORD_CHALLENGE,
-            _json({'challenge': self._pending_challenge.hex()}),
-        )
-
-    def handle_password_auth_response(
-        self,
-        packet: 'BSHPacket',
-        username: str,
-        password_auth,           # BSHPasswordAuth instance
-    ) -> 'BSHPacket':
-        """
-        Host: verify the password response → success or failure.
-
-        Two verification paths:
-          • If payload has ``'proof'``: HMAC challenge-response (preferred).
-          • If payload has ``'password'``: direct password check (simpler clients).
-
-        Returns:
-            MSG_AUTH_SUCCESS or MSG_AUTH_FAILURE
-        """
-        try:
-            data  = json.loads(packet.payload.decode('utf-8'))
-            proof = data.get('proof')
-
-            if proof is not None:
-                # HMAC proof path
-                valid = password_auth.verify_password_proof(
-                    username, self._pending_challenge, proof
-                )
-            else:
-                # Plaintext-password path (simple / legacy clients)
-                pw    = data.get('password', '')
-                valid = password_auth.verify_password(username, pw)
-
-            self._pending_challenge = None
-
-            if valid:
-                self.session_key   = self.crypto.generate_session_key()
-                self.authenticated = True
-                return BSHPacket(
-                    MessageType.MSG_AUTH_SUCCESS,
-                    _json({'status': 'authenticated', 'username': username,
-                           'session_key': self.session_key.hex()}),
-                )
-            return _failure('Authentication failed')
-
-        except Exception as exc:
-            return _failure(str(exc))
-
-    # ═══════════════════════════════════════════
-    # ── Client side — Password auth ──────────────
-    # ═══════════════════════════════════════════
-
-    def create_password_auth_request(self) -> 'BSHPacket':
-        """Client: initiate password authentication."""
-        return BSHPacket(MessageType.MSG_AUTH_PASSWORD_REQUEST, _json({}))
-
-    def create_password_response(
-        self,
-        packet: 'BSHPacket',
-        password: str,
-        salt: Optional[bytes] = None,
-    ) -> 'BSHPacket':
-        """
-        Client: respond to MSG_AUTH_PASSWORD_CHALLENGE.
-
-        If *salt* is provided, uses HMAC challenge-response.
-        Otherwise falls back to sending the plaintext password.
-
-        Args:
-            packet:   MSG_AUTH_PASSWORD_CHALLENGE from server
-            password: User's plain-text password
-            salt:     PBKDF2 salt for this user (received out-of-band or from server)
-
-        Returns:
-            MSG_AUTH_PASSWORD_RESPONSE
-        """
-        data      = json.loads(packet.payload.decode('utf-8'))
-        challenge = bytes.fromhex(data['challenge'])
-
-        if salt is not None:
-            import hashlib, hmac as _hmac
-            key, _ = self.crypto.derive_key_from_password(password, salt)
-            if isinstance(password, str):
-                password = password.encode('utf-8')
-            proof = _hmac.new(key, challenge, hashlib.sha256).hexdigest()
-            return BSHPacket(
-                MessageType.MSG_AUTH_PASSWORD_RESPONSE,
-                _json({'proof': proof}),
-            )
-        else:
-            # Plaintext fallback (acceptable on encrypted BT link)
-            return BSHPacket(
-                MessageType.MSG_AUTH_PASSWORD_RESPONSE,
-                _json({'password': password}),
-            )
-
-    def handle_auth_success(self, packet: 'BSHPacket') -> bool:
-        """
-        Client: process MSG_AUTH_SUCCESS and extract/store the session key.
-
-        Returns:
-            bool: True if extraction succeeded.
-        """
-        try:
-            data             = json.loads(packet.payload.decode('utf-8'))
-            self.session_key = bytes.fromhex(data['session_key'])
-            self.authenticated = True
-            return True
-        except Exception as exc:
-            print(f"BSHAuthenticator: failed to extract session key: {exc}")
-            return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

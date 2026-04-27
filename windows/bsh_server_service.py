@@ -38,10 +38,9 @@ from pathlib import Path
 from ctypes import wintypes
 
 from bsh_protocol import (
-    BSHPacket, MessageType, BSHAuthenticator,
+    BSHPacket, MessageType,
     create_hello_packet, create_data_packet,
 )
-from bsh_password import BSHPasswordAuth
 from bsh_crypto import BSHCrypto
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -551,16 +550,11 @@ class WindowsAuthService:
 class BSHHostService:
     def __init__(
         self,
-        password_file: str = None,
         channel: int = 1,
     ):
         self._log      = logging.getLogger('BSHServer.HostService')
         self.win_auth  = WindowsAuthService()
-        self.crypto    = BSHCrypto()          # Bug #1 fix: crypto engine
-
-        default_pw            = r'C:\ProgramData\BSH\passwords'
-        self.password_file    = password_file or default_pw
-        self.password_auth: BSHPasswordAuth = None
+        self.crypto    = BSHCrypto()          
 
         self.server_sock        = None
         self.client_sock        = None
@@ -568,26 +562,14 @@ class BSHHostService:
         self.running            = False
         self.authenticated_user = None
         self.user_token         = None
-        self.session_key: bytes = None        # Bug #1 fix: active AES-256-GCM key
-        self._encrypted         = False       # Bug #1 fix: encryption active flag
+        self.session_key: bytes = None        
+        self._encrypted         = False       
         self._send_lock         = threading.Lock()
         self._connection_count  = 0
         self.bound_channel      = None
         self._runtime_file      = Path(r'C:\ProgramData\BSH\runtime.json')
 
-        self._load_password_db()
 
-    def _load_password_db(self):
-        try:
-            self.password_auth = BSHPasswordAuth(self.password_file)
-            n = len(self.password_auth.users)
-            if n:
-                self._log.info("Loaded %d password user(s) from %s", n, self.password_file)
-            else:
-                self._log.info("Password DB loaded but empty: %s", self.password_file)
-        except Exception as exc:
-            self._log.warning("Could not load password DB (%s): %s", self.password_file, exc)
-            self.password_auth = None
 
     def _create_rfcomm_socket(self) -> socket.socket:
         sock = socket.socket(AF_BTH, socket.SOCK_STREAM, BTHPROTO_RFCOMM)
@@ -757,70 +739,48 @@ class BSHHostService:
             self._encrypted         = False  # Bug #1 fix: reset encryption flag
 
     def authenticate_password(self, username: str, conn_id: int = 0):
+        # 1. Wait for MSG_AUTH_LOGIN
         pkt = self.receive_packet()
-        if not pkt or pkt.msg_type != MessageType.MSG_AUTH_PASSWORD_REQUEST:
-            self._send_failure('Expected MSG_AUTH_PASSWORD_REQUEST')
+        if not pkt or pkt.msg_type != MessageType.MSG_AUTH_LOGIN:
+            self._send_failure('Expected MSG_AUTH_LOGIN')
             return None
 
-        challenge = os.urandom(32)
-        self.send_packet(BSHPacket(
-            MessageType.MSG_AUTH_PASSWORD_CHALLENGE,
-            json.dumps({'challenge': challenge.hex()}).encode('utf-8'),
-        ))
-
-        resp = self.receive_packet()
-        if not resp or resp.msg_type != MessageType.MSG_AUTH_PASSWORD_RESPONSE:
-            self._send_failure('Expected MSG_AUTH_PASSWORD_RESPONSE')
-            return None
-
+        # 2. Extract password from payload
         try:
-            resp_data = json.loads(resp.payload.decode('utf-8'))
+            req_data = json.loads(pkt.payload.decode('utf-8'))
         except Exception:
-            self._send_failure('Malformed password response')
+            self._send_failure('Malformed login request')
             return None
 
-        password = resp_data.get('password', '')
+        password = req_data.get('password', '')
+        client_username = req_data.get('username', username) # Use client provided username if available
 
-        if self.password_auth and username in self.password_auth.users:
-            proof = resp_data.get('proof')
-            if proof is not None:
-                if not self.password_auth.verify_password_proof(username, challenge, proof):
-                    self._send_failure('Authentication failed')
-                    return None
-                sys_user = self.password_auth.get_system_user(username)
-            else:
-                if not self.password_auth.verify_password(username, password):
-                    self._send_failure('Authentication failed')
-                    return None
-                sys_user = self.password_auth.get_system_user(username)
-        else:
-            sys_user = username
-
-        if not self.win_auth.user_exists(sys_user):
+        # 3. Pass directly to Windows OS Auth
+        if not self.win_auth.user_exists(client_username):
             self._send_failure('User not found on this system')
             return None
 
-        token = self.win_auth.verify_password(sys_user, password)
+        token = self.win_auth.verify_password(client_username, password)
         if not token:
             self._send_failure('Windows authentication failed')
             return None
 
-        # Bug #1 fix: generate session key now so it is included in MSG_AUTH_SUCCESS
+        # 4. Success: Generate session key and send MSG_AUTH_SUCCESS
         self.session_key = self.crypto.generate_session_key()
 
         self.send_packet(BSHPacket(
             MessageType.MSG_AUTH_SUCCESS,
             json.dumps({
                 'status':      'authenticated',
-                'username':    username,
-                # Bug #1 fix: include session key so client can set up encryption
+                'username':    client_username,
                 'session_key': self.session_key.hex(),
             }).encode('utf-8'),
         ))
-        # Bug #1 fix: activate payload encryption for all subsequent packets
+        
+        # Activate payload encryption for subsequent packets
         self._encrypted = True
         return token
-
+        
     def start_shell_session(self, conn_id: int = 0):
         # Bug #2 fix: apply a short socket timeout so the loop can re-check
         # shell.is_running() without blocking forever inside recv().
