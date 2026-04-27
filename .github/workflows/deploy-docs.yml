@@ -1,0 +1,31 @@
+name: Deploy OpenBSH Docs
+
+on:
+  push:
+    branches:
+      - main  # Change this to 'master' if that is your default branch name
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install mkdocs-material
+          # Note: mkdocs-material automatically installs mkdocs and pymdown-extensions
+
+      - name: Build and deploy
+        run: mkdocs gh-deploy --force

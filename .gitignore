@@ -1,0 +1,15 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# MkDocs build directory (created when you run 'mkdocs build')
+site/
+
+# Virtual environments (just in case you add one later)
+venv/
+env/
+.venv/
+
+# OS generated files
+Thumbs.db
