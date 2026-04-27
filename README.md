@@ -16,13 +16,11 @@
 
 ## Documentation
 
-Full documentation is hosted using MkDocs. You can view the comprehensive documentation by running MkDocs locally or visiting the GitHub Pages site (if configured).
+Full documentation is hosted using MkDocs and is available online. It contains an in-depth look into the architecture, detailed setup guides for Windows and Linux, and deep dives into the BSH wire protocol.
 
-```bash
-# Run documentation locally
-pip install mkdocs mkdocs-material
-mkdocs serve
-```
+📖 **[Read the Documentation here!](https://hacker-sridhar.github.io/OpenBSH/)**
+
+
 
 ---
 
@@ -108,4 +106,4 @@ python bsh_password.py adduser alice
 
 ## License
 
-*(This project does not currently contain a LICENSE file. See recommendations below.)*
+This project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for more details.
