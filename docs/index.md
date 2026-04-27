@@ -1,4 +1,4 @@
-# OpenBSH: Enterprise Bluetooth Shell
+# OpenBSH:  Bluetooth Shell
 
 Welcome to the official documentation for **OpenBSH** — a robust, cross-platform Bluetooth Shell service. 
 
