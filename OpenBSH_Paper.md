@@ -124,25 +124,36 @@ Bluetooth RFCOMM provides a reliable byte stream similar to TCP. OpenBSH impleme
 Each OpenBSH packet follows this binary format:
 
 ```
-+------+--------+--------+------+-----------+-----------+
-| SOF  | Length | Length | Type | Payload   | Checksum  |
-| 0xAA | High   | Low    |      | (N bytes) | (XOR)     |
-+------+--------+--------+------+-----------+-----------+
-  1B      1B       1B      1B      N bytes      1B
++------+--------+------+-------------+-----------+
+| SOF  | Length | Type | Payload     | Checksum  |
+| 0xAA | (2 B)  |      | (N bytes)   | (XOR)     |
++------+--------+------+-------------+-----------+
+  1B      2B      1B      N bytes        1B
 ```
 
 - **Start of Frame (SOF)**: Fixed byte `0xAA` for synchronization
 - **Length**: 16-bit unsigned integer (big-endian) indicating payload size
 - **Type**: 8-bit message type identifier
 - **Payload**: Variable-length message data
-- **Checksum**: Single-byte XOR checksum over Length + Type + Payload
+- **Checksum**: Single-byte XOR checksum
 
-The checksum is calculated as:
+The checksum is calculated as an XOR over the 2 Length bytes, the Type byte, and all Payload bytes. The SOF byte (`0xAA`) is intentionally excluded from the checksum. This is reflected directly in `BSHPacket._checksum()`:
+
+```python
+def _checksum(self, length: int) -> int:
+    cs = (length >> 8) & 0xFF
+    cs ^= length & 0xFF
+    cs ^= int(self.msg_type)
+    for b in self.payload:
+        cs ^= b
+    return cs & 0xFF
 ```
-Checksum = LengthHigh ⊕ LengthLow ⊕ Type ⊕ Payload[0] ⊕ ... ⊕ Payload[N-1]
-```
+
+The serialized wire format is packed via `struct.pack('!BHB', SOF, length, msg_type)`, confirming the 1B+2B+1B header layout (4 bytes total before payload).
 
 #### 3.2.2 Message Types
+
+The following message types are defined in `MessageType(IntEnum)` in `bsh_protocol.py` (shared across all platforms):
 
 | Code | Name | Direction | Description |
 |------|------|-----------|-------------|
@@ -155,8 +166,11 @@ Checksum = LengthHigh ⊕ LengthLow ⊕ Type ⊕ Payload[0] ⊕ ... ⊕ Payload[
 | 0x10 | MSG_DATA_IN | Client → Server | Shell input (encrypted) |
 | 0x11 | MSG_DATA_OUT | Server → Client | Shell output (encrypted) |
 | 0x12 | MSG_DATA_ERR | Server → Client | Shell error output (encrypted) |
+| 0x15 | MSG_WINDOW_RESIZE | Client → Server | Terminal resize (alternate code) |
 | 0x20 | MSG_INTERRUPT | Client → Server | Interrupt signal (Ctrl+C) |
 | 0x21 | MSG_WINDOW_SIZE | Client → Server | Terminal window size |
+
+> **Note**: Two message type codes exist for terminal resize — `MSG_WINDOW_SIZE` (0x21) and `MSG_WINDOW_RESIZE` (0x15). Both are handled identically in the server's `start_shell_session` loop; `MSG_WINDOW_RESIZE` is an alternate code accepted for compatibility.
 
 ### 3.3 Cryptographic Protocol
 
@@ -167,52 +181,78 @@ OpenBSH uses **AES-256-GCM** (Galois/Counter Mode) for authenticated encryption,
 - **Authenticity**: 128-bit authentication tag prevents tampering
 - **Resistance to replay**: Unique IV per packet
 
+The implementation uses the Python `cryptography` library (`cryptography.hazmat.primitives.ciphers`), which is identical across Linux, Windows, and client code (`linux/bsh_crypto.py`, `windows/bsh_crypto.py`, `Client/bsh_crypto.py`).
+
 #### 3.3.2 Key Derivation and Management
 
-**Password Storage**: Standalone passwords are stored using PBKDF2-HMAC-SHA256:
+**PBKDF2 Key Derivation** (used for standalone password hashing, not session keys):
+```python
+kdf = PBKDF2HMAC(
+    algorithm=hashes.SHA256(), length=32, salt=salt,
+    iterations=100_000, backend=self.backend,
+)
+key, salt = kdf.derive(password), salt
 ```
-stored_hash = PBKDF2-HMAC-SHA256(password, salt, iterations=100,000)
-```
+- Salt: 16 bytes of `os.urandom(16)`
+- Output: 32-byte key
 
 **Session Key Generation**: Upon successful authentication, the server generates a fresh 256-bit session key:
-```
+```python
 session_key = os.urandom(32)  # 256 bits of cryptographic randomness
+```
+
+The session key is transmitted to the client as a hex-encoded string in the `MSG_AUTH_SUCCESS` JSON payload:
+```json
+{"status": "authenticated", "username": "<user>", "session_key": "<64-char hex>"}
 ```
 
 #### 3.3.3 Packet Encryption Format
 
-After authentication, all packet payloads are encrypted:
+After authentication, all packet payloads are encrypted. The wire format returned by `BSHCrypto.encrypt_data()` is:
 
 ```
-Encrypted Payload = IV || Ciphertext || Auth_Tag
-
-Where:
-  IV = 12 random bytes (generated per packet)
-  Ciphertext = AES-256-GCM.Encrypt(session_key, IV, plaintext_payload)
-  Auth_Tag = 16-byte GCM authentication tag
+Encrypted Payload = IV(12 B) || Ciphertext(N B) || GCM Auth Tag(16 B)
 ```
 
-**Critical Security Property**: Each packet uses a unique IV generated via `os.urandom(12)`, ensuring:
-- No IV reuse (catastrophic for GCM)
-- Protection against replay attacks
-- Independent security per packet
+```python
+def encrypt_data(self, key: bytes, plaintext: bytes) -> bytes:
+    iv  = os.urandom(12)
+    enc = Cipher(algorithms.AES(key), modes.GCM(iv), backend=self.backend).encryptor()
+    ct  = enc.update(plaintext) + enc.finalize()
+    return iv + ct + enc.tag   # 12 + N + 16 bytes
+
+def decrypt_data(self, key: bytes, encrypted: bytes) -> bytes:
+    iv, tag, ct = encrypted[:12], encrypted[-16:], encrypted[12:-16]
+    dec = Cipher(algorithms.AES(key), modes.GCM(iv, tag), backend=self.backend).decryptor()
+    return dec.update(ct) + dec.finalize()
+```
+
+**Critical Security Property**: Each packet uses a unique IV generated via `os.urandom(12)`, ensuring no IV reuse (which would be catastrophic for GCM security).
 
 ### 3.4 Authentication Protocol
 
 #### 3.4.1 Authentication Flow
 
+The actual authentication flow implemented in the code is as follows. Note that the **username is included in the client's `MSG_HELLO` payload**, not only in `MSG_AUTH_LOGIN`:
+
 ```
 Client                                    Server
   │                                         │
-  │─────── MSG_HELLO ─────────────────────→│
-  │←────── MSG_HELLO ──────────────────────│
+  │── MSG_HELLO ──────────────────────────→│
+  │   {name, version, auth_method,          │
+  │    username}                            │
+  │←── MSG_HELLO ──────────────────────────│
+  │    {name, version, os, features}        │
   │                                         │
-  │── MSG_AUTH_LOGIN (user, password) ────→│
+  │── MSG_AUTH_LOGIN ──────────────────────→│
+  │   {username, password (plaintext)}      │
   │                                         │
-  │                                         │ Verify password
-  │                                         │ Generate session_key
+  │                                         │ Verify via PAM/shadow (Linux)
+  │                                         │   or LogonUserW (Windows)
+  │                                         │ Generate session_key = os.urandom(32)
   │                                         │
-  │←─── MSG_AUTH_SUCCESS (session_key) ────│
+  │←── MSG_AUTH_SUCCESS ───────────────────│
+  │    {status, username, session_key: hex} │
   │                                         │
   ╞═══════════════════════════════════════╡
   │    All subsequent traffic encrypted    │
@@ -223,41 +263,61 @@ Client                                    Server
   │←─ MSG_DATA_OUT (encrypted) ────────────│
 ```
 
+The server-side `handle_client()` reads `username` and `auth_method` from the client `MSG_HELLO`. If `auth_method` is not `'password'`, the connection is refused immediately. The subsequent `MSG_AUTH_LOGIN` packet carries a JSON body with `{"username": ..., "password": ...}`.
+
 #### 3.4.2 Authentication Methods
 
-OpenBSH supports two authentication modes:
+OpenBSH supports **one primary authentication mode** per platform:
 
-1. **Native OS Authentication** (Default):
-   - Linux: PAM (Pluggable Authentication Modules) with `/etc/shadow` fallback
-   - Windows: `LogonUserW` API call for credential validation
+1. **Linux — OS Authentication** (PAM preferred, `/etc/shadow` fallback):
+   ```python
+   # Primary: python-pam
+   result = self._pam.authenticate(username, password, service='login')
+   
+   # Fallback (requires root + spwd module):
+   computed = crypt.crypt(password, stored)
+   result = hmac.compare_digest(computed, stored)
+   ```
+   `spwd` (the shadow module) was removed in Python 3.13; the code logs an error if it is unavailable.
 
-2. **Standalone BSH Database**:
-   - Independent password database with PBKDF2 hashing
-   - Users must still map to valid OS accounts for shell spawning
-   - Useful for different credentials or restricted Bluetooth access
+2. **Windows — Windows Security API**:
+   ```python
+   result = self.advapi32.LogonUserW(
+       username, None, password,
+       LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+       ctypes.byref(token),
+   )
+   ```
+   The `domain` parameter is passed as `None`, meaning Windows resolves the account against the local SAM database by default. Domain-joined behaviour is subject to the host's own account resolution rules.
+
+> **Correction regarding "Standalone BSH Database"**: Earlier documentation referred to a standalone BSH password database. **This feature is not present in the current codebase**. No `bsh_password.py` module or standalone credential store exists on either platform. Both Linux and Windows authenticate exclusively against the native OS user database. The `derive_key_from_password()` utility in `bsh_crypto.py` exists as a reusable primitive but is not wired into an independent credential store in the current code.
 
 ### 3.5 Session Management
 
 #### 3.5.1 Connection Lifecycle
 
-1. **Initial Handshake**: MSG_HELLO exchange (capabilities, OS detection)
-2. **Authentication**: Client sends MSG_AUTH_LOGIN with username and password
-3. **Encrypted Session**: All traffic protected by AES-256-GCM
-4. **Keepalive**: Periodic MSG_KEEPALIVE packets (every 500ms)
-5. **Termination**: MSG_DISCONNECT or connection timeout
+1. **Initial Handshake**: Client sends `MSG_HELLO` (with `username` and `auth_method`); server responds with its own `MSG_HELLO` (with `os` field and `features` list)
+2. **Authentication**: Client sends `MSG_AUTH_LOGIN` with plaintext `username` and `password`
+3. **Session Key Exchange**: Server sends `MSG_AUTH_SUCCESS` with a hex-encoded 32-byte session key; encryption activates immediately for all subsequent packets
+4. **Keepalive**: Client sends `MSG_KEEPALIVE` every **0.5 seconds** from a dedicated background thread. The server also sets a socket timeout of 0.5 seconds to interleave keepalive checks without blocking indefinitely.
+5. **Termination**: `MSG_DISCONNECT` or connection error
+
+> **Correction**: The paper previously stated keepalive packets are sent every 500 ms. The Linux client code confirms this exactly: the keepalive thread fires `threading.Event().wait(0.5)` per iteration and puts a `MSG_KEEPALIVE` packet into the send queue each cycle.
 
 #### 3.5.2 Terminal Emulation
 
 OpenBSH provides an interactive shell transport with platform-specific terminal handling:
 
-**Linux**: Uses `pty.openpty()` to create a master/slave PTY pair
-**Windows**: Uses a shell process with pipe-based stdin/stdout/stderr redirection rather than a true PTY
+**Linux Server**: Uses `pty.openpty()` to create a master/slave PTY pair. The child process receives the slave FD as its controlling terminal via `os.setsid()` + `fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)`. The server's main loop uses `select.select()` on the master FD for non-blocking I/O.
+
+**Windows Server**: Spawns `cmd.exe` with pipe-based stdin/stdout/stderr redirection via `CreatePipe` and either `CreateProcessAsUserW` (when running as SYSTEM) or `subprocess.Popen` (when running as Administrator). There is no Windows PTY (ConPTY) in the current implementation.
 
 **Terminal Features**:
-- Window size synchronization (MSG_WINDOW_SIZE)
-- Echo control (client-side echo disabled for Linux servers)
-- Signal handling (MSG_INTERRUPT for Ctrl+C)
-- Support for interactive applications (vim, htop, etc.)
+- Window size synchronization via `MSG_WINDOW_SIZE` (0x21) and `MSG_WINDOW_RESIZE` (0x15) — both handled identically in the server loop
+- Linux PTY resize applied via `fcntl.ioctl(master_fd, termios.TIOCSWINSZ, ...)`
+- Windows server accepts `MSG_WINDOW_SIZE` / `MSG_WINDOW_RESIZE` but does not apply them (no PTY)
+- Signal handling: `MSG_INTERRUPT` → `os.kill(child_pid, signal.SIGINT)` on Linux; `WriteFile(stdin_write, b'\x03')` on Windows
+- Echo control: client-side raw mode on Linux (remote PTY handles echo); client-side line buffer on Windows
 
 ---
 
@@ -294,11 +354,11 @@ We consider the following threat classes:
 
 **Analysis**: AES-256 is currently considered secure against all known attacks when properly implemented. The 256-bit key space (2^256 ≈ 1.16×10^77) makes brute force infeasible.
 
-**Limitation**: Pre-authentication messages (MSG_HELLO) are transmitted in plaintext.
+**Limitation**: Pre-authentication messages (`MSG_HELLO`, `MSG_AUTH_LOGIN`) are transmitted in plaintext at the application layer.
 
-**Critical Issue**: The password in MSG_AUTH_LOGIN is currently sent *before* session key establishment. This means the password traverses the Bluetooth link without application-layer encryption, relying solely on Bluetooth link-layer security.
+**Critical Issue**: The password in `MSG_AUTH_LOGIN` is sent *before* session key establishment. This means the password traverses the Bluetooth link without application-layer encryption, relying solely on Bluetooth link-layer security.
 
-**Mitigation**: Bluetooth pairing provides link-layer encryption. For maximum security, SSP (Secure Simple Pairing) should be used, which provides 128-bit equivalent security.
+**Mitigation**: Bluetooth pairing provides link-layer encryption. For maximum security, SSP (Secure Simple Pairing) should be used.
 
 #### 4.2.2 Authenticity and Integrity
 
@@ -306,34 +366,34 @@ We consider the following threat classes:
 
 **Analysis**: The GCM authentication tag prevents tampering. Any modification to ciphertext, IV, or associated data will cause authentication failure and connection termination. The probability of successful forgery is 2^-128 ≈ 2.94×10^-39 per attempt.
 
-**Checksum**: The wire protocol includes an additional XOR checksum, providing basic error detection for the packet framing layer before decryption.
+**Checksum**: The wire protocol includes an additional XOR checksum over the Length, Type, and Payload bytes (SOF excluded), providing basic error detection for the packet framing layer before decryption.
 
 #### 4.2.3 Replay Protection
 
 **Property**: Unique IV per packet prevents replay attacks
 
-**Analysis**: Each packet uses a fresh 12-byte IV generated via `os.urandom()`. The probability of IV collision is negligible (2^-96 ≈ 1.26×10^-29 per pair). Even if an attacker captures and replays a valid encrypted packet, the application context prevents meaningful exploitation (e.g., replaying shell output to the server is meaningless).
+**Analysis**: Each packet uses a fresh 12-byte IV generated via `os.urandom()`. The probability of IV collision is negligible (2^-96 ≈ 1.26×10^-29 per pair). Even if an attacker captures and replays a valid encrypted packet, the application context prevents meaningful exploitation.
 
 **Limitation**: No explicit sequence numbers or timestamps. However, the stateful nature of shell sessions and unique IVs provide practical replay protection.
 
 #### 4.2.4 Forward Secrecy
 
-**Limitation**: OpenBSH does **not** provide perfect forward secrecy. The session key is directly transmitted (encrypted by Bluetooth link-layer) rather than derived via Diffie-Hellman key exchange.
+**Limitation**: OpenBSH does **not** provide perfect forward secrecy. The session key is generated server-side and transmitted in plaintext (application-layer) inside `MSG_AUTH_SUCCESS`, before any application-layer encryption is active. This means the session key itself is exposed on the Bluetooth link-layer channel during transmission.
 
-**Impact**: If the Bluetooth link-layer encryption is compromised and traffic is recorded, an attacker could decrypt the session key transmission and subsequently decrypt the entire session.
+**Impact**: If the Bluetooth link-layer encryption is compromised and traffic is recorded, an attacker could read the session key from `MSG_AUTH_SUCCESS` and subsequently decrypt the entire session.
 
-**Mitigation Strategy**: This design choice prioritizes simplicity and performance for the target use case (proximity-based administration). Future versions could incorporate ECDH key exchange.
+**Mitigation Strategy**: This design choice prioritizes simplicity and performance for the target use case. Future versions could incorporate ECDH key exchange.
 
 #### 4.2.5 Authentication Security
 
 **Strengths**:
-- PBKDF2 with 100,000 iterations makes password database attacks expensive
-- Integration with OS authentication leverages platform security features
+- PBKDF2 with 100,000 iterations available for standalone password hashing
+- Integration with OS authentication leverages platform security features (PAM, Windows LogonUser)
 
 **Weaknesses**:
-- Password transmitted in MSG_AUTH_LOGIN before session key active
-- No protection against brute-force authentication attempts beyond Bluetooth pairing
-- No rate limiting at protocol level (relies on server implementation)
+- Password transmitted in `MSG_AUTH_LOGIN` before session key is active (no application-layer encryption at that point)
+- No rate limiting at the protocol level (relies on server OS and Bluetooth pairing)
+- No brute-force protection beyond OS-level account lockout policies
 
 ### 4.3 Attack Analysis
 
@@ -341,12 +401,12 @@ We consider the following threat classes:
 
 **Attack**: Attacker captures Bluetooth traffic
 
-**Defense**: 
-- Bluetooth pairing provides link-layer encryption (ESP recommended)
+**Defense**:
+- Bluetooth pairing provides link-layer encryption
 - Post-authentication traffic encrypted with AES-256-GCM
 - Even if link-layer compromised, session traffic remains encrypted
 
-**Effectiveness**: High protection for session data, limited protection for password transmission
+**Effectiveness**: High protection for session data; limited protection for pre-authentication exchanges (HELLO, AUTH_LOGIN)
 
 #### 4.3.2 Active Tampering
 
@@ -355,16 +415,16 @@ We consider the following threat classes:
 **Defense**:
 - GCM authentication tag detects any modification
 - Connection immediately terminated on authentication failure
-- XOR checksum provides additional integrity check
+- XOR checksum provides additional integrity check at the framing layer
 
-**Effectiveness**: Very high protection - tampering is detected and prevented
+**Effectiveness**: Very high protection — tampering is detected and rejected
 
 #### 4.3.3 Man-in-the-Middle
 
 **Attack**: Attacker intercepts and relays traffic
 
 **Defense**:
-- Requires compromising Bluetooth pairing (challenging with SSP)
+- Requires compromising Bluetooth pairing (challenging with SSP numeric comparison)
 - Application-layer encryption independent of transport
 
 **Limitation**: Without public key infrastructure, MITM at pairing stage is possible
@@ -375,33 +435,33 @@ We consider the following threat classes:
 
 **Attack**: Attacker forces use of weak cryptography
 
-**Defense**: 
-- Single cipher suite (AES-256-GCM) - no negotiation, no downgrade possible
-- Protocol version in MSG_HELLO allows compatibility checking
+**Defense**:
+- Single cipher suite (AES-256-GCM) — no negotiation, no downgrade possible
+- Only `auth_method: 'password'` is accepted; any other value is rejected immediately
 
-**Effectiveness**: Complete protection - no algorithm negotiation to attack
+**Effectiveness**: Complete protection — no algorithm negotiation to attack
 
 ### 4.4 Comparison with SSH
 
 | Security Property | SSH | OpenBSH |
-|-------------------|-----|---------|
-| Encryption | AES-128/256, ChaCha20 | AES-256-GCM |
-| Authentication | Multiple (password, pubkey, etc.) | Password + OS auth |
-| Forward Secrecy | Yes (Diffie-Hellman) | No (session key transmitted) |
+|-------------------|-----|---------| 
+| Encryption | AES-128/256, ChaCha20 | AES-256-GCM only |
+| Authentication | Multiple (password, pubkey, etc.) | Password + OS auth (PAM/LogonUser) |
+| Forward Secrecy | Yes (Diffie-Hellman) | No (session key sent in plaintext before encryption) |
 | MITM Protection | Host key verification | Bluetooth pairing |
 | Replay Protection | Sequence numbers | Unique IV per packet |
 | Transport | TCP/IP | Bluetooth RFCOMM |
 | Range | Network (unlimited) | Bluetooth (~10-100m) |
 
-**Key Difference**: SSH provides stronger cryptographic properties (forward secrecy, explicit MITM protection), but OpenBSH offers availability in non-network scenarios—a fundamentally different value proposition.
+**Key Difference**: SSH provides stronger cryptographic properties (forward secrecy, explicit MITM protection), but OpenBSH offers availability in non-network scenarios — a fundamentally different value proposition.
 
 ### 4.5 Security Recommendations
 
 For production deployment:
 
 1. **Mandatory Bluetooth Pairing**: Enforce SSP (Secure Simple Pairing) with numeric comparison
-2. **Rate Limiting**: Implement authentication attempt limits
-3. **Audit Logging**: Log all authentication attempts and session activities
+2. **Rate Limiting**: Implement authentication attempt limits at the OS level
+3. **Audit Logging**: Log all authentication attempts and session activities (service logs to `/var/log/bsh/` on Linux, `C:\ProgramData\BSH\logs\` on Windows)
 4. **Network Isolation**: Disable network interfaces when relying on Bluetooth-only access
 5. **Future Enhancement**: Add ECDH key exchange for forward secrecy
 
@@ -432,6 +492,8 @@ OpenBSH achieves cross-platform consistency through careful architectural separa
      └────────────────┘      └────────────────┘
 ```
 
+The `bsh_protocol.py` and `bsh_crypto.py` files are kept in **three copies**: `linux/`, `windows/`, and `Client/`. They are intended to be kept byte-for-byte identical across all three locations.
+
 This design ensures:
 - **Cryptographic uniformity**: Identical security properties on all platforms
 - **Protocol consistency**: Same wire format and message semantics
@@ -441,145 +503,166 @@ This design ensures:
 
 #### 5.2.1 Service Architecture
 
-**Deployment Model**: systemd service unit (`bsh.service`)
+**Deployment Model**: systemd service unit (`bsh.service`) managed via `bsh_service.py`
 
-**Privilege Model**: Must run as root (UID 0) for PAM integration and user impersonation
+**Privilege Model**: Must run as root (UID 0) for PAM integration and `setuid`/`setgid` user impersonation
 
-**Key Components**:
+**Runtime Files**:
+- Service log: `/var/log/bsh/bsh_service.log`
+- Runtime state (bound channel, PID): `/run/bsh/runtime.json`
+- Config file: `/etc/bsh/config.json` (optional; defaults in `bsh_service.py`)
+- Data directory: `/var/lib/bsh/`
 
-- Bluetooth RFCOMM listener implemented in Python
-- Authentication path using PAM when available, with local account checks as fallback
-- PTY-backed shell session created with `pty.openpty()`
-- Privilege drop to the authenticated local user before launching the login shell
+**Bluetooth Stack**: Uses Python stdlib `socket.AF_BLUETOOTH` / `socket.BTPROTO_RFCOMM` directly. PyBluez (`bluetooth.BluetoothSocket`) is used when available for SDP advertisement; falls back to the `sdptool` CLI tool; and if that also fails, logs a warning that clients must connect by explicit channel number. The BSH service UUID is `B5E7DA7A-0B53-1000-8000-00805F9B34FB`.
+
+**Channel Binding**: Attempts to bind to the requested channel (default: 1). If that channel is in use (`errno 98`), scans channels 1–30 in order.
 
 **PTY Implementation**:
 - Uses `pty.openpty()` for master/slave terminal pair
-- Master FD for server I/O, slave FD for shell process
-- Non-blocking I/O with `select()` for multiplexing
-- Proper signal handling (SIGCHLD for process cleanup)
+- Child process: `os.setsid()` + `fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)` to set controlling terminal
+- Master FD for server I/O, slave FD for child shell process
+- Non-blocking I/O with `select.select([master_fd], [], [], 0.05)` for output polling
+- Window resize via `fcntl.ioctl(master_fd, termios.TIOCSWINSZ, ...)`
+- Signal handling: `SIGTERM` for graceful shutdown; `SIGINT` forwarded to child via `os.kill(child_pid, signal.SIGINT)`
 
 #### 5.2.2 Authentication Flow
 
-1. **PAM Integration** (Primary):
+1. **PAM Integration** (Primary — requires `python-pam` package):
    ```python
    import pam
    pam_auth = pam.pam()
-   success = pam_auth.authenticate(username, password)
+   success = pam_auth.authenticate(username, password, service='login')
    ```
 
-2. **Shadow File Fallback** (If PAM unavailable):
+2. **Shadow File Fallback** (when PAM unavailable — requires root + `spwd` module):
    ```python
-   import crypt
-   shadow_entry = read_shadow_file(username)
-   hash_match = crypt.crypt(password, shadow_entry) == shadow_entry
+   import spwd, crypt, hmac
+   entry  = spwd.getspnam(username)
+   stored = entry.sp_pwdp
+   computed = crypt.crypt(password, stored)
+   result = hmac.compare_digest(computed, stored)
    ```
+   > **Note**: `spwd` was removed in Python 3.13. The code logs an explicit error if it is unavailable. `hmac.compare_digest()` is used (not `==`) to prevent timing attacks.
+
+#### 5.2.3 User Impersonation
+
+When running as root, the shell child process drops privileges before exec:
+```python
+os.setgroups(supp_groups)   # supplementary groups
+os.setgid(gid)              # primary group
+os.setuid(uid)              # user ID
+```
+The user's login shell (from `pw.pw_shell`) is exec'd as a login shell (`-bash`, `-sh`, etc.) with a clean environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `PATH`).
 
 ### 5.3 Windows Implementation
 
 #### 5.3.1 Service Architecture
 
-**Deployment Model**: Native Windows Service (via `win32serviceutil`)
+**Deployment Model**: Native Windows Service via `pywin32` (`win32serviceutil.ServiceFramework`), managed through `bsh_service.py`
 
-**Privilege Model**: Runs as `LocalSystem` (required for `SE_TCB_NAME` and `SE_ASSIGNPRIMARYTOKEN_NAME` privileges)
+**Service Name**: `BSHService` / display name: `BSH Bluetooth Shell Service`
 
-**Key Components**:
+**Privilege Model**: Runs as `LocalSystem` (`NT AUTHORITY\SYSTEM`). The following privileges are requested via the `RequiredPrivileges` registry value:
+- `SeAssignPrimaryTokenPrivilege` — spawn processes as other users
+- `SeIncreaseQuotaPrivilege` — adjust process memory quotas
+- `SeTcbPrivilege` — act as part of the OS
 
-- Native Windows service wrapper
-- Credential validation through `LogonUserW`
-- User-context shell launch with redirected standard handles
-- Pipe-based I/O for stdin, stdout, and stderr
+**Runtime Files**:
+- Service log: `C:\ProgramData\BSH\logs\bsh_service.log`
+- Runtime state: `C:\ProgramData\BSH\runtime.json`
+- Config file: `C:\ProgramData\BSH\config.json` (optional; defaults in `bsh_service.py`)
+
+**Bluetooth Stack**: Uses raw Winsock2 via `ctypes.windll.ws2_32` with `AF_BTH = 32` and `BTHPROTO_RFCOMM = 3`. SDP advertisement uses `WSASetServiceW` with the BSH service UUID.
+
+**Channel Binding**: Attempts to bind to the requested channel. Uses `BT_PORT_ANY` (`0xFFFFFFFF`) only when `channel == 0`; otherwise uses the requested channel directly.
 
 #### 5.3.2 Process Impersonation
 
 Windows implementation uses token-based impersonation:
 
-1. **Authenticate**: `LogonUserW` validates credentials and returns user token
-2. **Impersonate or launch in user context**: the service starts the shell with the authenticated user's security context
-3. **I/O Redirection**: Pipe-based communication is used because the current implementation does not expose a true Windows PTY
+1. **Authenticate**: `LogonUserW` with `LOGON32_LOGON_INTERACTIVE` validates credentials and returns a user token
+2. **Shell launch** (SYSTEM context): `CreateProcessAsUserW` with the user token, loading user profile via `LoadUserProfileW` and creating an environment block via `CreateEnvironmentBlock`
+3. **Shell launch** (non-SYSTEM, plain Administrator): `subprocess.Popen(['cmd.exe'], stdin=PIPE, stdout=PIPE, stderr=STDOUT)` — no impersonation
+4. **I/O**: Pipe-based (`CreatePipe`) stdin/stdout/stderr — there is no Windows PTY (ConPTY) in the current implementation
 
-**Security Context**: Shell runs with privileges of authenticated user, not LocalSystem
+**Security Context**: When running as SYSTEM, the shell runs with the privileges of the authenticated user, not SYSTEM.
+
+**Ctrl+C**: Implemented by writing `b'\x03'` directly to the stdin pipe (not `GenerateConsoleCtrlEvent`, which could affect the server process group).
 
 ### 5.4 Client Implementation
 
 #### 5.4.1 Platform-Specific Considerations
 
-OpenBSH clients implement a dynamic, dual-mode architecture that adapts its terminal input model based on the target server's operating system (advertised in the `MSG_HELLO` payload).
+OpenBSH provides two client scripts: `bsh_client_linux.py` and `bsh_client_windows.py`. Each implements a dynamic, dual-mode architecture that adapts its terminal input model based on the target server's operating system (advertised in the `MSG_HELLO` payload as the `os` field).
 
-**Linux Client**:
-- **To Linux Server (Native PTY):** Operates in pure raw terminal mode (`termios.tcsetattr`), forwarding every keystroke character-by-character. The remote Linux PTY line discipline handles canonical editing, backspace, and echo natively, behaving identically to an SSH session.
-- **To Windows Server (Pipe-based):** Falls back to a Windows-specific local editing path. The client intercepts control keys (like arrow keys, Home, End, Del) and maintains a local line buffer and command history, sending the entire line only when Enter is pressed.
+**Linux Client (to Linux Server — Native PTY)**:
+- Switches stdin to raw mode via `termios.tcsetattr(stdin_fd, termios.TCSANOW, raw_settings)`
+- Forwards every keystroke character-by-character as `MSG_DATA_IN`
+- The remote Linux PTY line discipline handles echo, backspace, and canonical editing
+- `SIGWINCH` handler sends `MSG_WINDOW_SIZE` on terminal resize
 
-**Windows Client**:
-- **To Windows Server (Pipe-based):** Uses local line-buffered editing with command history. ANSI escape codes are used to implement local cursor movement and line redrawing, because the remote pipe-based shell does not support native PTY echo.
-- **To Linux Server (Native PTY):** Disables local echo and forwards keystrokes. It relies on the remote Linux PTY to echo characters back via `MSG_DATA_OUT` to prevent double-echoing.
+**Linux Client (to Windows Server — Pipe-based)**:
+- Falls back to a Windows-compatible local editing path
+- Intercepts control keys (arrow keys, Home, End, Del, Backspace) client-side using escape sequence parsing
+- Maintains a local line buffer (`win_buffer`) and command history (`win_history`)
+- Sends the complete line (buffer + `\r\n`) only when Enter is pressed
 
-#### 5.4.2 Connection Flow
+**Windows Client (to Windows Server — Pipe-based)**:
+- Uses local line-buffered editing with command history
+- ANSI escape codes used to implement local cursor movement and line redrawing
 
-```python
-# Simplified client connection flow (illustrative pseudocode)
-class BSHClient:
-    def connect(self, address, channel, username):
-        # 1. Establish Bluetooth connection
-        self.sock = platform_open_rfcomm_socket()
-        self.sock.connect((address, channel))
-        
-        # 2. Exchange HELLO messages
-        self.send_hello()
-        server_hello = self.receive_hello()
-        server_os = server_hello.get("os", "unknown")
-        
-        # 3. Perform authentication
-        password = getpass.getpass("Password: ")
-        self.send_auth_login(username, password)
-        auth_result = self.receive_auth_result()
-        
-        if auth_result.success:
-            self.session_key = auth_result.session_key
-            # Enter encrypted interactive mode
-            self.interactive_session(server_os)
-        
-    def interactive_session(self, server_os):
-        # 4. Adaptive Terminal setup
-        if server_os == "Linux":
-            # Remote PTY handles echo and line discipline
-            setup_raw_forwarding_mode()
-        elif server_os == "Windows":
-            # Client maintains local history and line-buffering
-            setup_local_line_editing_mode()
-        
-        # Main I/O loop
-        while True:
-            # Send keepalives
-            # Read keyboard input → MSG_DATA_IN
-            # Receive server output → MSG_DATA_OUT/ERR
-            # Handle window resize → MSG_WINDOW_SIZE
+**Windows Client (to Linux Server — Native PTY)**:
+- Disables local echo; forwards keystrokes character-by-character
+- Relies on the remote Linux PTY to echo characters back via `MSG_DATA_OUT`
+
+#### 5.4.2 Connection and Authentication Flow
+
+```
+1. RFCOMM socket connect to (MAC, channel)
+2. Send MSG_HELLO: {name, version, auth_method: 'password', username}
+3. Receive server MSG_HELLO → read 'os' field to determine terminal mode
+4. Prompt for password via getpass.getpass()
+5. Send MSG_AUTH_LOGIN: {username, password}
+6. Receive MSG_AUTH_SUCCESS → extract session_key = bytes.fromhex(data['session_key'])
+7. Activate AES-256-GCM encryption for all subsequent packets
+8. Start interactive session:
+   - Background thread: keepalive (every 0.5 s)
+   - Background thread: receive loop (MSG_DATA_OUT → stdout)
+   - Main thread: keyboard input → MSG_DATA_IN / MSG_INTERRUPT / MSG_DISCONNECT
+   - SIGWINCH → MSG_WINDOW_SIZE
 ```
 
 #### 5.4.3 Cross-Platform Compatibility Matrix
 
-Because the servers use fundamentally different shell backends (PTY vs. pipe-based `cmd.exe`), the interactive experience shifts across the four distinct client/server pairings:
-
 | Pair | Server OS Field | Actual Shell Backend | Editing Authority | `MSG_WINDOW_SIZE` Handling |
 |---|---|---|---|---|
-| Windows Client -> Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
-| Windows Client -> Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY (`TIOCSWINSZ`) |
-| Linux Client -> Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
-| Linux Client -> Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied to PTY (`TIOCSWINSZ`) |
+| Windows Client → Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
+| Windows Client → Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied via `TIOCSWINSZ` |
+| Linux Client → Windows Server | `Windows` | `cmd.exe` via pipes | Client-side line editor | Sent, but ignored by server |
+| Linux Client → Linux Server | `Linux` | PTY-backed login shell | Remote Linux PTY | Applied via `TIOCSWINSZ` |
+
+#### 5.4.4 SDP Channel Discovery (Linux Client)
+
+The Linux client implements a three-tier channel discovery strategy:
+1. **PyBluez SDP** (`bt.find_service()`) — queries BSH UUID, then SPP UUID as fallback
+2. **`sdptool browse`** — parses output for RFCOMM channel lines
+3. **Channel scan** — connects to channels 1–12 with a 3-second timeout each
+4. **Manual entry** — if all else fails, prompts the user
 
 ### 5.5 Error Handling and Robustness
 
 #### 5.5.1 Connection Management
 
-- **Keepalive Mechanism**: Client sends `MSG_KEEPALIVE` periodically during the interactive loop
-- **Timeout Detection**: Connection loss is handled through socket errors, read failures, and disconnect handling in the service loop
+- **Keepalive Mechanism**: Client sends `MSG_KEEPALIVE` every 0.5 seconds from a dedicated daemon thread. Server socket timeout is also set to 0.5 seconds so the shell-exit check loop doesn't block between keepalives.
+- **Timeout Detection**: The server's `_recv_exact()` re-raises `socket.timeout` so that the outer `start_shell_session` loop can `continue` rather than treating a timeout as a disconnect
 - **Graceful Shutdown**: `MSG_DISCONNECT` allows clean termination
-- **Error Recovery**: Checksum failures trigger packet resynchronization
+- **Checksum failures**: `BSHPacket.from_bytes()` returns `None` on checksum mismatch; the server drops the packet and the session terminates
 
 #### 5.5.2 Cryptographic Error Handling
 
-- **Authentication Tag Failure**: Decryption failure causes the packet to be rejected and the session to terminate
-- **Nonce Generation**: Each encrypted payload carries a fresh random IV generated by the sender
-- **Session Key Lifetime**: Session keys are generated per session and discarded when the connection closes
+- **GCM Tag Failure**: `crypto.decrypt_data()` raises `cryptography.exceptions.InvalidTag`; the server catches this, logs a warning, and returns `None` (causing session termination)
+- **Nonce Generation**: Each encrypted payload carries a fresh random 12-byte IV from the sender
+- **Session Key Lifetime**: Session keys are generated per connection in `authenticate_password()` and cleared (set to `None`) in `handle_client()`'s `finally` block on disconnect. The `_encrypted` flag is also reset to `False`.
 
 ---
 
@@ -587,9 +670,7 @@ Because the servers use fundamentally different shell backends (PTY vs. pipe-bas
 
 ### 6.1 Evidence Boundaries
 
-The current repository provides an implementation and operational documentation, but it does not include a reproducible benchmark harness, published measurement dataset, or automated performance-reporting pipeline. Earlier drafts of this paper included quantitative latency, throughput, CPU, and memory figures; those values should be treated as unsupported unless a dedicated evaluation methodology and raw results are added to the project.
-
-For that reason, this section focuses on implementation-backed deployment observations rather than synthetic benchmark claims.
+The current repository provides an implementation and operational documentation, but it does not include a reproducible benchmark harness, published measurement dataset, or automated performance-reporting pipeline. This section focuses on implementation-backed deployment observations rather than synthetic benchmark claims.
 
 ### 6.2 Operational Characteristics
 
@@ -602,13 +683,13 @@ Based on the code base, OpenBSH is best understood as a proximity-oriented admin
 Several implementation properties shape these characteristics:
 
 - Bluetooth RFCOMM is the transport, so session setup and I/O behavior are bounded by Bluetooth stack behavior and radio conditions
-- Every encrypted application payload carries IV and authentication-tag overhead because AES-256-GCM is applied per packet
-- The Linux implementation can support terminal-oriented workflows through a real PTY
+- Every encrypted application payload carries 12-byte IV and 16-byte authentication-tag overhead
+- The Linux implementation supports terminal-oriented workflows through a real PTY (including `vim`, `htop`, etc.)
 - The Windows implementation provides an interactive shell through redirected pipes rather than a true PTY abstraction
 
 ### 6.3 Practical Positioning
 
-OpenBSH should be positioned as a complementary tool, not a replacement for SSH or other network-native administration systems. Relative to those systems, its main advantage is availability when IP networking is absent or intentionally unavailable. Its trade-offs are shorter range, lower expected throughput than typical LAN-based management, and a current authentication design that still depends on Bluetooth link-layer protection during password submission.
+OpenBSH should be positioned as a complementary tool, not a replacement for SSH or other network-native administration systems. Its main advantage is availability when IP networking is absent or intentionally unavailable. Its trade-offs are shorter range, lower expected throughput than typical LAN-based management, and a current authentication design that still depends on Bluetooth link-layer protection during password submission.
 
 ### 6.4 Measurement Status
 
@@ -678,12 +759,12 @@ No repository-backed benchmark data is currently published for cryptographic thr
    - Regularly audit paired device list
 
 2. **Authentication**:
-   - Use separate BSH passwords (not system passwords)
-   - Enforce strong password policies (>12 characters, complexity)
-   - Implement account lockout after failed attempts
+   - Use strong OS account passwords (BSH uses the OS credential store directly)
+   - Enforce strong password policies at the OS level
+   - Leverage OS account lockout policies for brute-force protection (BSH itself has no rate limiting)
 
 3. **Access Control**:
-   - Limit BSH access to specific administrative accounts
+   - Limit BSH-accessible accounts to specific administrative users
    - Use OS-level authorization (sudo, UAC) for privileged operations
    - Enable comprehensive audit logging
 
@@ -705,8 +786,8 @@ No repository-backed benchmark data is currently published for cryptographic thr
    - Forensic logging for security investigations
 
 3. **Maintenance**:
-   - Regular security updates
-   - Periodic password rotation
+   - Regular security updates to dependencies (`cryptography`, `pywin32`, `python-pam`)
+   - Periodic password rotation on OS accounts
    - Review and update paired device list
 
 ### 6.7 Integration Considerations
@@ -714,21 +795,25 @@ No repository-backed benchmark data is currently published for cryptographic thr
 #### 6.7.1 Enterprise Directory Services
 
 **Windows Account Validation**:
-- The Windows service validates credentials through `LogonUserW`
-- In domain-joined environments, practical behavior depends on host configuration and how usernames are supplied
+- The Windows service validates credentials through `LogonUserW` with `domain=None`
+- In domain-joined environments, Windows resolves accounts against the local SAM or domain depending on the username format supplied (`user` vs. `DOMAIN\user`)
 - Password policy enforcement remains the responsibility of the underlying Windows account system
 
 **LDAP Integration** (Linux):
 - PAM LDAP module for centralized authentication
-- Inherit organizational password policies
+- BSH uses PAM with `service='login'`, so any PAM-configured LDAP/SSSD module applies automatically
 - Audit trail in central directory
 
 #### 6.7.2 Logging and SIEM Integration
 
-The current code base emits operational logs, but it does not define a formal JSON event schema or bundled SIEM connector. In practice, deployments can forward service logs into existing monitoring pipelines and build alerts around authentication failures, connection attempts, and unusual access timing.
+Service logs are written to:
+- Linux: `/var/log/bsh/bsh_service.log`
+- Windows: `C:\ProgramData\BSH\logs\bsh_service.log`
+
+The log format is `%(asctime)s [%(levelname)-8s] %(name)s: %(message)s`. There is no formal JSON event schema or bundled SIEM connector in the current codebase. Deployments can forward service logs into existing monitoring pipelines.
 
 Recommended SIEM rules:
-- Alert on repeated authentication failures
+- Alert on repeated authentication failures (`PAM auth FAILED` / `LogonUser FAILED`)
 - Alert on connections from unknown MAC addresses
 - Alert on connections outside business hours
 
@@ -741,18 +826,13 @@ Recommended SIEM rules:
 - Class 2: ~10 meters (most laptops/servers)
 - Class 3: ~1 meter (rare)
 
-**Implications**:
-- Physical proximity requirement is both a feature (security) and limitation (usability)
-- Range varies with obstacles (walls, equipment)
-- Multi-floor data centers may require physical movement
-
 #### 6.8.2 Performance Limitations
 
 **Not Suitable For**:
 - Large file transfers (use SCP/rsync when network available)
 - High-bandwidth applications
 - Latency-sensitive operations
-- Multiple concurrent sessions (Bluetooth RFCOMM limitations)
+- Multiple concurrent sessions (the server listens with `backlog=1` and handles one connection at a time in the main loop)
 
 **Suitable For**:
 - Interactive command-line administration
@@ -761,7 +841,11 @@ Recommended SIEM rules:
 - Log inspection
 - Service management
 
-#### 6.8.3 Device Pairing Management
+#### 6.8.3 Concurrency
+
+The current server implementation handles **one client connection at a time**. The server socket is bound with `listen(1)` and the `while self.running` accept loop calls `handle_client()` synchronously. A second connecting client will be queued at the OS level until the first session terminates.
+
+#### 6.8.4 Device Pairing Management
 
 **Challenge**: Bluetooth pairing state persistence
 
@@ -779,7 +863,7 @@ Recommended SIEM rules:
 
 #### 7.1.1 Perfect Forward Secrecy
 
-**Current Limitation**: Session key transmitted directly; no forward secrecy
+**Current Limitation**: Session key generated server-side and transmitted in `MSG_AUTH_SUCCESS` before any application-layer encryption is active; no forward secrecy
 
 **Proposed Enhancement**: Implement ECDH (Elliptic Curve Diffie-Hellman) key exchange:
 
@@ -789,11 +873,8 @@ Client                          Server
   │───── ephemeral_public_C ─────→│
   │                               │ Generate ephemeral_private_S
   │                               │ Compute shared_secret = ECDH(...)
-  │                               │
   │←──── ephemeral_public_S ──────│
-  │                               │
   │ Compute shared_secret         │
-  │                               │
   ╞═══════════════════════════════╡
   │  Derive session_key from      │
   │  shared_secret + nonces       │
@@ -814,11 +895,6 @@ Client                          Server
 - Mutual authentication via certificate verification
 - Eliminates password transmission entirely
 
-**Benefits**:
-- Stronger authentication
-- No password exposure risk
-- Better integration with PKI infrastructure
-
 #### 7.1.3 Multi-Factor Authentication
 
 **Proposal**: Add support for second-factor authentication:
@@ -831,7 +907,7 @@ Client                          Server
 
 #### 7.2.1 Multiplexing
 
-**Current Limitation**: Single shell session per Bluetooth connection
+**Current Limitation**: Single shell session per Bluetooth connection; server accepts `backlog=1`
 
 **Proposed Enhancement**: Add channel multiplexing:
 
@@ -844,7 +920,6 @@ MSG_CHANNEL_CLOSE (channel_id)
 **Benefits**:
 - Multiple shell sessions over single Bluetooth connection
 - Separate channels for shell, file transfer, port forwarding
-- Improved resource utilization
 
 #### 7.2.2 Compression
 
@@ -854,11 +929,9 @@ MSG_CHANNEL_CLOSE (channel_id)
 - Negotiated during initial handshake
 - Reduces bandwidth for text-heavy operations
 
-**Trade-off**: CPU overhead vs. bandwidth savings
-
 #### 7.2.3 File Transfer Protocol
 
-**Current Limitation**: File transfer via shell redirection only
+**Current Limitation**: File transfer only via shell redirection
 
 **Proposal**: Add dedicated file transfer messages:
 
@@ -868,17 +941,17 @@ MSG_FILE_DATA (chunk_number, data)
 MSG_FILE_COMPLETE (checksum)
 ```
 
-**Benefits**:
-- Efficient file transfer without shell escaping
-- Progress indication
-- Integrity verification
+#### 7.2.4 Windows ConPTY Support
+
+**Current Limitation**: Windows shell uses pipe-based I/O; no true PTY abstraction; `MSG_WINDOW_SIZE` is received but not applied
+
+**Proposal**: Integrate Windows ConPTY (Pseudo Console API available since Windows 10 1809) to provide a proper terminal on Windows, enabling full-screen terminal applications and proper window resizing.
 
 ### 7.3 Bluetooth 5.0+ Features
 
 **Low Energy (BLE)**:
 - Investigate BLE support for IoT devices
 - Lower power consumption for embedded systems
-- Extended range with BLE long-range mode
 
 **Dual-Mode Operation**:
 - Support both Classic and BLE simultaneously
@@ -898,19 +971,17 @@ MSG_FILE_COMPLETE (checksum)
 
 - Built-in session recording (asciicast format)
 - Compliance and audit requirements
-- Automated transcript archival
 
-#### 7.5.2 Intrusion Detection
+#### 7.5.2 Concurrent Sessions
 
-- Behavioral analysis of shell commands
-- Anomaly detection for unusual activity
-- Integration with security monitoring systems
+- Multi-threaded or async accept loop
+- Per-connection thread with proper session isolation
 
-#### 7.5.3 Bluetooth Mesh Support
+#### 7.5.3 Standalone Credential Store
 
-- Multi-hop communication for extended range
-- Mesh network for server-to-server communication
-- Eliminates need for point-to-point proximity
+- Independent BSH password database (currently absent from the codebase)
+- PBKDF2 infrastructure (`derive_key_from_password`) already exists in `bsh_crypto.py`
+- Would allow Bluetooth-specific credentials separate from OS accounts
 
 ---
 
@@ -930,25 +1001,28 @@ This paper presented OpenBSH, a secure, cross-platform Bluetooth shell protocol 
 
 ### 8.2 Operational Assessment
 
-The current code base supports an operational assessment rather than a benchmark-driven performance claim. OpenBSH is well suited to interactive administrative tasks, recovery workflows, and low-bandwidth command-and-response sessions. The repository does not currently include the measurement artifacts required to support quantitative latency, throughput, CPU, or memory claims.
+OpenBSH is well suited to interactive administrative tasks, recovery workflows, and low-bandwidth command-and-response sessions. The repository does not currently include measurement artifacts to support quantitative latency, throughput, CPU, or memory claims.
 
 ### 8.3 Deployment Viability
+
 OpenBSH is immediately deployable for:
 - Emergency recovery scenarios in data centers
 - Air-gapped secure environments (defense, financial, research)
 - Edge device management with unreliable networks
 - Backup administrative access channels
 
-The system integrates naturally with existing security infrastructure such as PAM-based authentication on Linux and Windows account validation through `LogonUserW`. Service logs can also be forwarded into external monitoring or SIEM pipelines, though the repository does not currently define a formal event schema.
+The system integrates with PAM-based authentication on Linux and Windows account validation through `LogonUserW`. Service logs can be forwarded into external monitoring or SIEM pipelines, though no formal event schema is currently defined.
 
 ### 8.4 Limitations and Trade-offs
 
 OpenBSH intentionally trades some security properties and transport flexibility for network independence:
 
-**Performance**: Expected throughput and latency are constrained by Bluetooth RFCOMM and are likely to lag behind network-native protocols
-**Range**: Limited to Bluetooth proximity (~10-100m)
-**Forward Secrecy**: Current design lacks perfect forward secrecy
-**Password Transmission**: Pre-authentication password sent before session encryption active
+- **Performance**: Expected throughput and latency are constrained by Bluetooth RFCOMM
+- **Range**: Limited to Bluetooth proximity (~10-100m)
+- **Forward Secrecy**: Session key transmitted before application-layer encryption is active; no perfect forward secrecy
+- **Password Transmission**: Pre-authentication password sent in `MSG_AUTH_LOGIN` before session encryption is active
+- **Concurrency**: Single connection at a time (server `listen(1)`, synchronous `handle_client()`)
+- **Windows Terminal**: No ConPTY; pipe-based I/O only; `MSG_WINDOW_SIZE` accepted but not applied
 
 These limitations are acceptable given the target use case: proximity-based emergency and air-gapped administration where network alternatives are unavailable.
 
@@ -957,22 +1031,16 @@ These limitations are acceptable given the target use case: proximity-based emer
 Ongoing development will focus on:
 - **Enhanced security**: ECDH key exchange for forward secrecy, certificate-based authentication
 - **Protocol improvements**: Session multiplexing, file transfer support, compression
-- **Platform expansion**: macOS, Android, iOS clients
-- **Advanced features**: Session recording, intrusion detection, Bluetooth mesh support
+- **Platform expansion**: macOS, Android, iOS clients; Windows ConPTY support
+- **Advanced features**: Session recording, concurrent session support, standalone credential store
 
 ### 8.6 Final Remarks
 
 OpenBSH demonstrates that Bluetooth, traditionally viewed as a peripheral connectivity technology, can be elevated to a secure administrative channel with careful protocol design and modern cryptography. By filling the gap between traditional serial console access and network-based remote administration, OpenBSH provides system administrators with a powerful tool for scenarios where network connectivity cannot be assumed.
 
-The project exemplifies the principle that security and reliability often require multiple, independent communication paths. OpenBSH serves as one such path—not replacing network administration, but complementing it as a proximity-based, out-of-band alternative for critical situations.
-
-As systems become increasingly network-dependent, the value of network-independent management channels grows. OpenBSH represents a step toward ensuring that physical proximity to systems remains a viable and secure method of administrative access, even as we embrace cloud, remote, and distributed computing paradigms.
-
 ---
 
 ## References
-
-[To be filled with actual citations - placeholder references shown for structure]
 
 [1] Ylonen, T., & Lonvick, C. (2006). The Secure Shell (SSH) Protocol Architecture. RFC 4251.
 
@@ -986,19 +1054,11 @@ As systems become increasingly network-dependent, the value of network-independe
 
 [6] Dunning, J. P. (2010). Taming the Blue Beast: A Survey of Bluetooth Based Threats. IEEE Security & Privacy, 8(2), 65-68.
 
-[7] Kocher, P., Jaffe, J., & Jun, B. (2011). Introduction to Differential Power Analysis. Journal of Cryptographic Engineering, 1(1), 5-27.
+[7] Padgette, J., Bahr, J., Batra, M., Holtmann, M., Smithbey, R., Chen, L., & Scarfone, K. (2017). Guide to Bluetooth Security. NIST Special Publication 800-121 Revision 2.
 
-[8] Lindell, Y. (2020). Secure Multiparty Computation (MPC). Communications of the ACM, 64(1), 86-96.
+[8] Ryan, M. (2013). Bluetooth: With Low Energy Comes Low Security. In 7th USENIX Workshop on Offensive Technologies (WOOT 13).
 
-[9] Padgette, J., Bahr, J., Batra, M., Holtmann, M., Smithbey, R., Chen, L., & Scarfone, K. (2017). Guide to Bluetooth Security. NIST Special Publication 800-121 Revision 2.
-
-[10] Ryan, M. (2013). Bluetooth: With Low Energy Comes Low Security. In 7th USENIX Workshop on Offensive Technologies (WOOT 13).
-
-[11] Scarfone, K., & Souppaya, M. (2007). Guide to Enterprise Password Management. NIST Special Publication 800-118.
-
-[12] Schneier, B. (2015). Applied Cryptography: Protocols, Algorithms, and Source Code in C (20th Anniversary Edition). Wiley.
-
-[13] Zhang, Y., & Navda, V. (2017). BlueBorne Attack Vector: The Dangers of Bluetooth Implementations. In Proceedings of ACM Conference on Computer and Communications Security (CCS).
+[9] Scarfone, K., & Souppaya, M. (2007). Guide to Enterprise Password Management. NIST Special Publication 800-118.
 
 ---
 
@@ -1006,19 +1066,76 @@ As systems become increasingly network-dependent, the value of network-independe
 
 ### Appendix A: Complete Message Type Specification
 
-[Detailed specification of all message types, payload structures, and state machines]
+All message types are defined in `MessageType(IntEnum)` in `bsh_protocol.py` (identical across `linux/`, `windows/`, and `Client/`):
+
+| Code | Name | Direction | Payload Format |
+|------|------|-----------|---------------|
+| 0x01 | MSG_HELLO | Bidirectional | JSON: `{name, version, os?, features?, username?, auth_method?}` |
+| 0x02 | MSG_DISCONNECT | Bidirectional | Empty |
+| 0x03 | MSG_KEEPALIVE | Bidirectional | Empty |
+| 0x07 | MSG_AUTH_SUCCESS | Server → Client | JSON: `{status, username, session_key: <hex>}` |
+| 0x08 | MSG_AUTH_FAILURE | Server → Client | JSON: `{error: <message>}` |
+| 0x09 | MSG_AUTH_LOGIN | Client → Server | JSON: `{username, password}` |
+| 0x10 | MSG_DATA_IN | Client → Server | UTF-8 bytes (encrypted post-auth) |
+| 0x11 | MSG_DATA_OUT | Server → Client | UTF-8 bytes (encrypted post-auth) |
+| 0x12 | MSG_DATA_ERR | Server → Client | UTF-8 bytes (encrypted post-auth) |
+| 0x15 | MSG_WINDOW_RESIZE | Client → Server | `struct.pack('!HH', rows, cols)` |
+| 0x20 | MSG_INTERRUPT | Client → Server | Empty |
+| 0x21 | MSG_WINDOW_SIZE | Client → Server | `struct.pack('!HH', rows, cols)` |
 
 ### Appendix B: Cryptographic Implementation Details
 
-[Detailed description of AES-GCM usage, IV generation, key derivation parameters]
+- **Library**: Python `cryptography` ≥ 41.0
+- **Cipher**: AES-256-GCM (`algorithms.AES(key)`, `modes.GCM(iv)`)
+- **Key size**: 32 bytes (256 bits) generated via `os.urandom(32)`
+- **IV size**: 12 bytes per packet, generated via `os.urandom(12)`
+- **Tag size**: 16 bytes (GCM default)
+- **Wire format**: `IV(12) || Ciphertext(N) || Tag(16)`
+- **KDF**: PBKDF2-HMAC-SHA256, 100,000 iterations, 16-byte salt, 32-byte output
+- **Backend**: `cryptography.hazmat.backends.default_backend()`
 
 ### Appendix C: Installation and Configuration Guide
 
-[Complete deployment documentation for production environments]
+**Linux**:
+```
+sudo pip install -r linux/requirements.txt   # cryptography, PyBluez, python-pam
+sudo python3 linux/bsh_service.py install
+sudo python3 linux/bsh_service.py start
+sudo python3 linux/bsh_service.py status
+```
+
+Config: `/etc/bsh/config.json` — keys: `channel` (int), `log_level` (str)
+
+**Windows**:
+```
+pip install cryptography pywin32
+python windows\bsh_service.py install
+python windows\bsh_service.py start
+python windows\bsh_service.py status
+```
+
+Config: `C:\ProgramData\BSH\config.json` — keys: `channel` (int), `log_level` (str)
+
+**Client**:
+```
+# Linux
+python3 Client/bsh_client_linux.py alice@AA:BB:CC:DD:EE:FF
+python3 Client/bsh_client_linux.py alice@AA:BB:CC:DD:EE:FF -p 1
+
+# Windows
+python Client\bsh_client_windows.py alice@AA:BB:CC:DD:EE:FF
+```
 
 ### Appendix D: Security Audit Checklist
 
-[Comprehensive checklist for security auditing OpenBSH deployments]
+- [ ] Bluetooth pairing uses SSP numeric comparison (not Just Works)
+- [ ] Paired device list audited and cleaned regularly
+- [ ] OS accounts used for BSH have strong passwords
+- [ ] OS account lockout policy configured (BSH has no built-in rate limiting)
+- [ ] Service logs forwarded to SIEM and monitored for `AUTH FAILED` events
+- [ ] `python-pam` installed on Linux (avoid shadow fallback requiring root + deprecated `spwd`)
+- [ ] Service running as root (Linux) or SYSTEM (Windows) with minimal exposure
+- [ ] `bsh.service` / `BSHService` disabled when not in active use
 
 ### Appendix E: Evaluation Plan Placeholder
 
@@ -1036,12 +1153,8 @@ As systems become increasingly network-dependent, the value of network-independe
 
 ## Data Availability
 
-Source code and documentation are available in the project repository. No standalone experimental benchmark dataset is currently included with this paper.
+Source code and documentation are available in the project repository at https://github.com/Hacker-SriDhar/OpenBSH. No standalone experimental benchmark dataset is currently included with this paper.
 
 ---
 
 *End of Paper*
-
-
-
-
