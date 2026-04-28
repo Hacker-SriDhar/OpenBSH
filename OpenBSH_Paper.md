@@ -90,29 +90,32 @@ OpenBSH consists of three primary components:
 2. **Cryptographic Layer** (`bsh_crypto.py`): Implements AES-256-GCM encryption/decryption and session key management
 3. **Platform Integration Layer**: OS-specific authentication and shell management
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Client System                        │
-│  ┌──────────┐  ┌─────────────┐  ┌──────────────────┐  │
-│  │  Client  │──│ Crypto Core │──│ Protocol Handler │  │
-│  └──────────┘  └─────────────┘  └──────────────────┘  │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                    Bluetooth RFCOMM
-                  (Post-auth: AES-256-GCM)
-                         │
-┌────────────────────────┴────────────────────────────────┐
-│                    Server System                        │
-│  ┌──────────┐  ┌─────────────┐  ┌──────────────────┐  │
-│  │  Server  │──│ Crypto Core │──│ Protocol Handler │  │
-│  │  Daemon  │  └─────────────┘  └──────────────────┘  │
-│  └────┬─────┘                                          │
-│       │                                                 │
-│  ┌────┴──────────┐  ┌─────────────────┐               │
-│  │ Auth Module:  │  │ Shell/PTY       │               │
-│  │ PAM/Win32     │  │ Emulation       │               │
-│  └───────────────┘  └─────────────────┘               │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph ClientSystem["Client System"]
+        ClientApp["Client Application"]
+        ClientProto["bsh_protocol.py<br/>Packet framing + message parsing"]
+        ClientCrypto["bsh_crypto.py<br/>AES-256-GCM + key handling"]
+        ClientApp --> ClientProto
+        ClientApp --> ClientCrypto
+    end
+
+    Link["Bluetooth RFCOMM<br/>Post-auth payloads encrypted with AES-256-GCM"]
+
+    subgraph ServerSystem["Server System"]
+        ServerDaemon["Server Daemon / Service"]
+        ServerProto["bsh_protocol.py<br/>Packet framing + message parsing"]
+        ServerCrypto["bsh_crypto.py<br/>AES-256-GCM + key handling"]
+        AuthLayer["Authentication Layer<br/>Linux: PAM or /etc/shadow<br/>Windows: LogonUserW"]
+        ShellLayer["Shell Layer<br/>Linux: PTY-backed login shell<br/>Windows: cmd.exe via pipes"]
+        ServerDaemon --> ServerProto
+        ServerDaemon --> ServerCrypto
+        ServerDaemon --> AuthLayer
+        ServerDaemon --> ShellLayer
+    end
+
+    ClientSystem <--> Link
+    Link <--> ServerSystem
 ```
 
 ### 3.2 Wire Protocol Specification
@@ -123,12 +126,16 @@ Bluetooth RFCOMM provides a reliable byte stream similar to TCP. OpenBSH impleme
 
 Each OpenBSH packet follows this binary format:
 
-```
-+------+--------+------+-------------+-----------+
-| SOF  | Length | Type | Payload     | Checksum  |
-| 0xAA | (2 B)  |      | (N bytes)   | (XOR)     |
-+------+--------+------+-------------+-----------+
-  1B      2B      1B      N bytes        1B
+```mermaid
+packet-beta
+0-7: "SOF (0xAA)"
+8-23: "Length (16-bit, big-endian)"
+24-31: "Type"
+32-39: "Payload byte 0"
+40-47: "Payload byte 1"
+48-55: "..."
+56-63: "Payload byte N-1"
+64-71: "Checksum (XOR)"
 ```
 
 - **Start of Frame (SOF)**: Fixed byte `0xAA` for synchronization
@@ -233,34 +240,22 @@ def decrypt_data(self, key: bytes, encrypted: bytes) -> bytes:
 
 #### 3.4.1 Authentication Flow
 
-The actual authentication flow implemented in the code is as follows. Note that the **username is included in the client's `MSG_HELLO` payload**, not only in `MSG_AUTH_LOGIN`:
+The actual authentication flow implemented in the code is as follows. Note that the **server sends `MSG_HELLO` first**, and the **username is included in the client's `MSG_HELLO` payload** as well as in `MSG_AUTH_LOGIN`:
 
-```
-Client                                    Server
-  │                                         │
-  │── MSG_HELLO ──────────────────────────→│
-  │   {name, version, auth_method,          │
-  │    username}                            │
-  │←── MSG_HELLO ──────────────────────────│
-  │    {name, version, os, features}        │
-  │                                         │
-  │── MSG_AUTH_LOGIN ──────────────────────→│
-  │   {username, password (plaintext)}      │
-  │                                         │
-  │                                         │ Verify via PAM/shadow (Linux)
-  │                                         │   or LogonUserW (Windows)
-  │                                         │ Generate session_key = os.urandom(32)
-  │                                         │
-  │←── MSG_AUTH_SUCCESS ───────────────────│
-  │    {status, username, session_key: hex} │
-  │                                         │
-  ╞═══════════════════════════════════════╡
-  │    All subsequent traffic encrypted    │
-  │         with AES-256-GCM              │
-  ╞═══════════════════════════════════════╡
-  │                                         │
-  │── MSG_DATA_IN (encrypted) ────────────→│
-  │←─ MSG_DATA_OUT (encrypted) ────────────│
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    S->>C: MSG_HELLO {name, version, os, features}
+    C->>S: MSG_HELLO {name, version, auth_method, username}
+    C->>S: MSG_AUTH_LOGIN {username, password}
+    Note over S: Verify via PAM or /etc/shadow on Linux<br/>or LogonUserW on Windows
+    Note over S: Generate session_key = os.urandom(32)
+    S->>C: MSG_AUTH_SUCCESS {status, username, session_key: hex}
+    Note over C,S: All subsequent payloads are encrypted with AES-256-GCM
+    C->>S: MSG_DATA_IN (encrypted)
+    S->>C: MSG_DATA_OUT / MSG_DATA_ERR (encrypted)
 ```
 
 The server-side `handle_client()` reads `username` and `auth_method` from the client `MSG_HELLO`. If `auth_method` is not `'password'`, the connection is refused immediately. The subsequent `MSG_AUTH_LOGIN` packet carries a JSON body with `{"username": ..., "password": ...}`.
@@ -290,7 +285,6 @@ OpenBSH supports **one primary authentication mode** per platform:
    ```
    The `domain` parameter is passed as `None`, meaning Windows resolves the account against the local SAM database by default. Domain-joined behaviour is subject to the host's own account resolution rules.
 
-> **Correction regarding "Standalone BSH Database"**: Earlier documentation referred to a standalone BSH password database. **This feature is not present in the current codebase**. No `bsh_password.py` module or standalone credential store exists on either platform. Both Linux and Windows authenticate exclusively against the native OS user database. The `derive_key_from_password()` utility in `bsh_crypto.py` exists as a reusable primitive but is not wired into an independent credential store in the current code.
 
 ### 3.5 Session Management
 
@@ -299,10 +293,9 @@ OpenBSH supports **one primary authentication mode** per platform:
 1. **Initial Handshake**: Client sends `MSG_HELLO` (with `username` and `auth_method`); server responds with its own `MSG_HELLO` (with `os` field and `features` list)
 2. **Authentication**: Client sends `MSG_AUTH_LOGIN` with plaintext `username` and `password`
 3. **Session Key Exchange**: Server sends `MSG_AUTH_SUCCESS` with a hex-encoded 32-byte session key; encryption activates immediately for all subsequent packets
-4. **Keepalive**: Client sends `MSG_KEEPALIVE` every **0.5 seconds** from a dedicated background thread. The server also sets a socket timeout of 0.5 seconds to interleave keepalive checks without blocking indefinitely.
+4. **Keepalive**: The client's background sender loop wakes every **0.5 seconds**, but an actual `MSG_KEEPALIVE` packet is emitted roughly every **5 seconds**. The server also sets a socket timeout of 0.5 seconds to interleave keepalive checks without blocking indefinitely.
 5. **Termination**: `MSG_DISCONNECT` or connection error
 
-> **Correction**: The paper previously stated keepalive packets are sent every 500 ms. The Linux client code confirms this exactly: the keepalive thread fires `threading.Event().wait(0.5)` per iteration and puts a `MSG_KEEPALIVE` packet into the send queue each cycle.
 
 #### 3.5.2 Terminal Emulation
 
@@ -473,23 +466,27 @@ For production deployment:
 
 OpenBSH achieves cross-platform consistency through careful architectural separation:
 
-```
-┌─────────────────────────────────────────────────┐
-│           Platform-Independent Core             │
-│  ┌────────────────┐    ┌──────────────────┐   │
-│  │ bsh_protocol.py│    │ bsh_crypto.py    │   │
-│  │ (Wire Protocol)│    │ (AES-256-GCM)    │   │
-│  └────────────────┘    └──────────────────┘   │
-└────────────┬────────────────────────┬───────────┘
-             │                        │
-     ┌───────┴────────┐      ┌───────┴────────┐
-     │  Linux Server  │      │ Windows Server │
-     │                │      │                │
-     │ • PAM Auth     │      │ • LogonUserW   │
-     │ • pty.openpty()│      │ • CreateProcess│
-     │ • setuid/setgid│      │   AsUser       │
-     │ • systemd      │      │ • Win32 Service│
-     └────────────────┘      └────────────────┘
+```mermaid
+flowchart TB
+    subgraph Core["Platform-Independent Core"]
+        Proto["bsh_protocol.py<br/>Shared framing + message definitions"]
+        Crypto["bsh_crypto.py<br/>Shared AES-256-GCM implementation"]
+    end
+
+    subgraph Linux["Linux Server Path"]
+        LP["PAM or /etc/shadow authentication"]
+        LS["PTY shell via pty.openpty(), setuid(), setgid()"]
+        LSvc["Service wrapper via systemd + bsh_service.py"]
+    end
+
+    subgraph Windows["Windows Server Path"]
+        WP["LogonUserW authentication"]
+        WS["cmd.exe via pipes + CreateProcessAsUserW"]
+        WSvc["Windows Service via pywin32 + bsh_service.py"]
+    end
+
+    Core --> Linux
+    Core --> Windows
 ```
 
 The `bsh_protocol.py` and `bsh_crypto.py` files are kept in **three copies**: `linux/`, `windows/`, and `Client/`. They are intended to be kept byte-for-byte identical across all three locations.
@@ -617,19 +614,20 @@ OpenBSH provides two client scripts: `bsh_client_linux.py` and `bsh_client_windo
 
 #### 5.4.2 Connection and Authentication Flow
 
-```
-1. RFCOMM socket connect to (MAC, channel)
-2. Send MSG_HELLO: {name, version, auth_method: 'password', username}
-3. Receive server MSG_HELLO → read 'os' field to determine terminal mode
-4. Prompt for password via getpass.getpass()
-5. Send MSG_AUTH_LOGIN: {username, password}
-6. Receive MSG_AUTH_SUCCESS → extract session_key = bytes.fromhex(data['session_key'])
-7. Activate AES-256-GCM encryption for all subsequent packets
-8. Start interactive session:
-   - Background thread: keepalive (every 0.5 s)
-   - Background thread: receive loop (MSG_DATA_OUT → stdout)
-   - Main thread: keyboard input → MSG_DATA_IN / MSG_INTERRUPT / MSG_DISCONNECT
-   - SIGWINCH → MSG_WINDOW_SIZE
+```mermaid
+flowchart TD
+    A["Connect RFCOMM socket to target MAC + channel"] --> B["Receive server MSG_HELLO<br/>Read os field and features"]
+    B --> C["Send client MSG_HELLO<br/>{name, version, auth_method: password, username}"]
+    C --> D["Prompt for password via getpass.getpass()"]
+    D --> E["Send MSG_AUTH_LOGIN<br/>{username, password}"]
+    E --> F["Receive MSG_AUTH_SUCCESS<br/>session_key = bytes.fromhex(...)"]
+    F --> G["Enable AES-256-GCM for all subsequent payloads"]
+    G --> H["Start interactive session"]
+    H --> H1["Background send loop ticks every 0.5 s"]
+    H --> H2["Actual keepalive packet emitted roughly every 5 s"]
+    H --> H3["Receive loop writes MSG_DATA_OUT / MSG_DATA_ERR to stdout"]
+    H --> H4["Main input path sends MSG_DATA_IN, MSG_INTERRUPT, MSG_DISCONNECT"]
+    H --> H5["SIGWINCH sends MSG_WINDOW_SIZE on Linux client"]
 ```
 
 #### 5.4.3 Cross-Platform Compatibility Matrix
@@ -653,7 +651,7 @@ The Linux client implements a three-tier channel discovery strategy:
 
 #### 5.5.1 Connection Management
 
-- **Keepalive Mechanism**: Client sends `MSG_KEEPALIVE` every 0.5 seconds from a dedicated daemon thread. Server socket timeout is also set to 0.5 seconds so the shell-exit check loop doesn't block between keepalives.
+- **Keepalive Mechanism**: The client uses a dedicated daemon thread whose sender loop wakes every 0.5 seconds, while `MSG_KEEPALIVE` packets are emitted roughly every 5 seconds. Server socket timeout is also set to 0.5 seconds so the shell-exit check loop doesn't block between wakeups.
 - **Timeout Detection**: The server's `_recv_exact()` re-raises `socket.timeout` so that the outer `start_shell_session` loop can `continue` rather than treating a timeout as a disconnect
 - **Graceful Shutdown**: `MSG_DISCONNECT` allows clean termination
 - **Checksum failures**: `BSHPacket.from_bytes()` returns `None` on checksum mismatch; the server drops the packet and the session terminates
@@ -867,18 +865,17 @@ The current server implementation handles **one client connection at a time**. T
 
 **Proposed Enhancement**: Implement ECDH (Elliptic Curve Diffie-Hellman) key exchange:
 
-```
-Client                          Server
-  │                               │
-  │───── ephemeral_public_C ─────→│
-  │                               │ Generate ephemeral_private_S
-  │                               │ Compute shared_secret = ECDH(...)
-  │←──── ephemeral_public_S ──────│
-  │ Compute shared_secret         │
-  ╞═══════════════════════════════╡
-  │  Derive session_key from      │
-  │  shared_secret + nonces       │
-  ╞═══════════════════════════════╡
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: Client ephemeral public key
+    Note over S: Generate server ephemeral keypair
+    Note over S: Compute shared secret with ECDH
+    S->>C: Server ephemeral public key
+    Note over C: Compute shared secret with ECDH
+    Note over C,S: Derive session_key from shared secret + nonces
 ```
 
 **Benefits**:
@@ -911,10 +908,15 @@ Client                          Server
 
 **Proposed Enhancement**: Add channel multiplexing:
 
-```
-MSG_CHANNEL_OPEN (channel_id, channel_type)
-MSG_CHANNEL_DATA (channel_id, data)
-MSG_CHANNEL_CLOSE (channel_id)
+```mermaid
+flowchart LR
+    Open["MSG_CHANNEL_OPEN<br/>(channel_id, channel_type)"] --> Shell["shell channel"]
+    Open --> Transfer["file-transfer channel"]
+    Open --> Forward["port-forward channel"]
+    Shell --> Data["MSG_CHANNEL_DATA<br/>(channel_id, data)"]
+    Transfer --> Data
+    Forward --> Data
+    Data --> Close["MSG_CHANNEL_CLOSE<br/>(channel_id)"]
 ```
 
 **Benefits**:
@@ -935,10 +937,16 @@ MSG_CHANNEL_CLOSE (channel_id)
 
 **Proposal**: Add dedicated file transfer messages:
 
-```
-MSG_FILE_REQUEST (filename, permissions)
-MSG_FILE_DATA (chunk_number, data)
-MSG_FILE_COMPLETE (checksum)
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: MSG_FILE_REQUEST(filename, permissions)
+    loop chunked transfer
+        S->>C: MSG_FILE_DATA(chunk_number, data)
+    end
+    S->>C: MSG_FILE_COMPLETE(checksum)
 ```
 
 #### 7.2.4 Windows ConPTY Support
@@ -1042,23 +1050,23 @@ OpenBSH demonstrates that Bluetooth, traditionally viewed as a peripheral connec
 
 ## References
 
-[1] Ylonen, T., & Lonvick, C. (2006). The Secure Shell (SSH) Protocol Architecture. RFC 4251.
+[1] Ylonen, T., & Lonvick, C. (2006). [The Secure Shell (SSH) Protocol Architecture. RFC 4251](https://www.rfc-editor.org/info/rfc4251).
 
-[2] Bluetooth SIG. (2019). Bluetooth Core Specification v5.1. Bluetooth Special Interest Group.
+[2] Bluetooth SIG. (2019). [Bluetooth Core Specification v5.1](https://www.bluetooth.com/specifications/specs/core-specification-5-1/). Bluetooth Special Interest Group.
 
-[3] Armknecht, F., Gajek, S., & Schwenk, J. (2007). A Security Framework for Bluetooth. In Applied Cryptography and Network Security.
+[3] Armknecht, F., Gajek, S., & Schwenk, J. (2007). A Security Framework for Bluetooth. In [Applied Cryptography and Network Security: 5th International Conference, ACNS 2007, Zhuhai, China, June 5-8, 2007, Proceedings](https://link.springer.com/book/10.1007/978-3-540-72738-5).
 
-[4] Barker, E. (2020). Recommendation for Key Management: Part 1 – General. NIST Special Publication 800-57 Part 1 Revision 5.
+[4] Barker, E. (2020). [Recommendation for Key Management: Part 1 - General](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final). NIST Special Publication 800-57 Part 1 Revision 5.
 
-[5] Dworkin, M. (2007). Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC. NIST Special Publication 800-38D.
+[5] Dworkin, M. (2007). [Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC](https://www.nist.gov/publications/recommendation-block-cipher-modes-operation-galoiscounter-mode-gcm-and-gmac). NIST Special Publication 800-38D.
 
-[6] Dunning, J. P. (2010). Taming the Blue Beast: A Survey of Bluetooth Based Threats. IEEE Security & Privacy, 8(2), 65-68.
+[6] Dunning, J. P. (2010). [Taming the Blue Beast: A Survey of Bluetooth Based Threats](https://doi.org/10.1109/MSP.2010.3). IEEE Security & Privacy, 8(2), 20-27.
 
-[7] Padgette, J., Bahr, J., Batra, M., Holtmann, M., Smithbey, R., Chen, L., & Scarfone, K. (2017). Guide to Bluetooth Security. NIST Special Publication 800-121 Revision 2.
+[7] Padgette, J., Bahr, J., Batra, M., Holtmann, M., Smithbey, R., Chen, L., & Scarfone, K. (2017). [Guide to Bluetooth Security](https://csrc.nist.gov/pubs/sp/800/121/r2/upd1/final). NIST Special Publication 800-121 Revision 2.
 
-[8] Ryan, M. (2013). Bluetooth: With Low Energy Comes Low Security. In 7th USENIX Workshop on Offensive Technologies (WOOT 13).
+[8] Ryan, M. (2013). [Bluetooth: With Low Energy Comes Low Security](https://www.usenix.org/conference/woot13/workshop-program/presentation/ryan). In 7th USENIX Workshop on Offensive Technologies (WOOT 13).
 
-[9] Scarfone, K., & Souppaya, M. (2007). Guide to Enterprise Password Management. NIST Special Publication 800-118.
+[9] Scarfone, K., & Souppaya, M. (2009). [Guide to Enterprise Password Management (Draft)](https://csrc.nist.gov/files/pubs/sp/800/118/ipd/docs/draft-sp800-118.pdf). NIST Special Publication 800-118.
 
 ---
 
@@ -1158,3 +1166,6 @@ Source code and documentation are available in the project repository at https:/
 ---
 
 *End of Paper*
+
+
+
