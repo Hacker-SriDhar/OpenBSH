@@ -148,7 +148,6 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 {
   "channel": 1,
   "log_level": "DEBUG",
-  "password_file": "$DATA_DIR/passwords",
   "log_file": "$LOG_DIR/bsh_service.log"
 }
 EOF
@@ -194,9 +193,6 @@ echo
 echo "=================================================="
 echo "  BSH installation complete!"
 echo "=================================================="
-echo
-echo "  Add a BSH user:"
-echo "    sudo $PYTHON $INSTALL_DIR/bsh_password.py adduser <username>"
 echo
 echo "  Start the service:"
 echo "    sudo systemctl start bsh"

@@ -15,8 +15,8 @@ The OpenBSH daemon runs in the background. Depending on your operating system, y
     journalctl -u bsh -f
 
     # Alternative: Python log viewer (no sudo needed)
-    python3 /opt/bsh/bsh_service.py logs
-    python3 /opt/bsh/bsh_service.py logs --follow   # tail -f style
+    python3 /opt/bsh/bsh_service.py logs             # last 50 lines
+    python3 /opt/bsh/bsh_service.py logs --follow    # tail -f style
     python3 /opt/bsh/bsh_service.py logs -n 100      # last 100 lines
     ```
 
@@ -33,16 +33,16 @@ The OpenBSH daemon runs in the background. Depending on your operating system, y
 
 ## Authentication Modes
 
-OpenBSH supports two modes of authentication:
+OpenBSH supports two documentation-level modes of authentication:
 
 1. **Native OS Authentication (Default):**
     - On Windows, OpenBSH uses the `LogonUserW` API to verify the target Windows account password.
     - On Linux, OpenBSH uses PAM when available and falls back to `/etc/shadow`-based verification when running with sufficient privileges.
 
-2. **Standalone BSH Password Database** *(not yet available in this release):*
-    - A standalone BSH password database (`bsh_password.py`) is planned for a future release.
-    - When available, it will allow granting BSH access using a password independent of the system password.
-    - Standalone users will still need to map to a valid OS user account so that OpenBSH can impersonate and spawn the shell.
+2. **Standalone BSH Password Database** *(not available in this release):*
+    - The current release does not ship a standalone BSH password database or `bsh_password.py` helper.
+    - Authentication is performed against native OS accounts only.
+    - Any future standalone credential store would still need to map to a valid OS user account so that OpenBSH can impersonate and spawn the shell.
 
 ---
 
@@ -82,7 +82,7 @@ Once connected and authenticated, you are dropped into the server-side shell imp
 The client will automatically handle:
 - **Terminal Sizing:** When you resize your client terminal window, a `MSG_WINDOW_SIZE` packet is sent to the server. Linux servers apply it to the remote PTY; Windows servers currently accept the packet but do not apply a PTY resize.
 - **Echo Suppression:** If connected to a Linux server, the client will suppress local keyboard echo, relying purely on the server's PTY, enabling complex terminal applications like `vim` or `htop`.
-- **Keepalives:** The client sends background keepalive pings every 0.5s to ensure the Bluetooth link remains active and doesn't timeout during periods of inactivity.
+- **Keepalives:** The client wakes its background sender loop every 0.5 seconds, but it only emits an actual keepalive packet roughly every 5 seconds to keep the Bluetooth link active during idle periods.
 
 To exit the session, simply type `exit` in the shell or press `Ctrl+C`.
 

@@ -1,16 +1,16 @@
 # Protocol & Security
 
-OpenBSH relies on a highly specialized, custom Wire Protocol built directly over Bluetooth RFCOMM. This design ensures that communications are resilient to Bluetooth frame fragmentation, and that packet payloads are encrypted after authentication succeeds.
+OpenBSH relies on a custom wire protocol built directly over Bluetooth RFCOMM. This design ensures that communications remain resilient to Bluetooth frame fragmentation and that packet payloads are encrypted after authentication succeeds.
 
 ---
 
 ## Cryptography Design
 
-All BSH traffic is secured using **AES-256-GCM** (Galois/Counter Mode). This provides both confidentiality (encryption) and authenticity (tamper-proofing).
+All BSH traffic is secured using **AES-256-GCM**. This provides both confidentiality and authenticity.
 
 ### Key Derivation & Storage
-- **Standalone Password Database:** When using the `bsh_password.py` database, passwords are never stored in plain text. They are hashed using **PBKDF2-HMAC-SHA256** with a randomly generated salt and `100,000` iterations.
-- **Session Keys:** The encryption keys used for the data stream are ephemeral. A new 32-byte (256-bit) AES session key is generated securely by the server (`os.urandom`) upon every successful authentication.
+- **PBKDF2 Helper:** The shared crypto module includes a PBKDF2-HMAC-SHA256 helper with a randomly generated salt and `100,000` iterations. In the current release, neither server uses a standalone BSH password database, so native OS authentication is the active path.
+- **Session Keys:** The encryption keys used for the data stream are ephemeral. A new 32-byte (256-bit) AES session key is generated securely by the server via `os.urandom()` upon every successful authentication.
 
 ### Wire Encryption Format
 Once the session key is negotiated via `MSG_AUTH_SUCCESS`, both the client and server transition to encrypted mode. Every subsequent packet payload is replaced with an AES-GCM envelope.
@@ -19,9 +19,9 @@ Once the session key is negotiated via `MSG_AUTH_SUCCESS`, both the client and s
 | IV (12 bytes) | AES-GCM Ciphertext (Variable) | Auth Tag (16 bytes) |
 ```
 
-- **IV (Initialization Vector):** A unique 12-byte nonce generated for *every single packet* using `os.urandom`. This prevents replay attacks and ensures encryption uniqueness even if the identical payload is sent twice.
+- **IV (Initialization Vector):** A unique 12-byte nonce generated for every packet using `os.urandom()`.
 - **Ciphertext:** The fully encrypted original payload.
-- **Auth Tag:** The 16-byte GCM authentication tag. The receiving side will immediately close the socket if this tag does not perfectly validate the ciphertext against the Session Key.
+- **Auth Tag:** The 16-byte GCM authentication tag. The receiving side closes the socket if the tag does not validate against the session key.
 
 ---
 
@@ -72,9 +72,9 @@ The protocol defines the following core message types:
 | `0x10` | `MSG_DATA_IN` | Client sends shell input. |
 | `0x11` | `MSG_DATA_OUT` | Server sends shell stdout. |
 | `0x12` | `MSG_DATA_ERR` | Server sends shell stderr. |
-| `0x15` | `MSG_WINDOW_RESIZE` | Alias for `MSG_WINDOW_SIZE` — client requests a PTY resize. Handled identically to `0x21` by the Linux server. |
-| `0x20` | `MSG_INTERRUPT` | Client requests a shell interrupt (Ctrl+C). |
-| `0x21` | `MSG_WINDOW_SIZE` | Client sends terminal size information (rows × cols). |
+| `0x15` | `MSG_WINDOW_RESIZE` | Alias for `MSG_WINDOW_SIZE` - client requests a PTY resize. Handled identically to `0x21` by both Linux and Windows servers. |
+| `0x20` | `MSG_INTERRUPT` | Client requests a shell interrupt (`Ctrl+C`). |
+| `0x21` | `MSG_WINDOW_SIZE` | Client sends terminal size information (`rows x cols`). |
 
 ---
 
@@ -91,14 +91,14 @@ The current wire protocol performs a simplified, single-step authentication. The
 The important behavioral difference is the server OS:
 
 - **Linux server:**
-  Verifies credentials via PAM (`python-pam`). If PAM is unavailable, the server falls back to `/etc/shadow` directly (requires root). The process must run as root to call `setuid()`/`setgid()` and impersonate the authenticated user for the shell session.
+  Verifies credentials via PAM (`python-pam`). If PAM is unavailable, the server falls back to `/etc/shadow` directly. The process must run as root to call `setuid()` and `setgid()` and impersonate the authenticated user for the shell session.
 - **Windows server:**
-  Calls `LogonUserW` (via ctypes) to validate the credentials against the Windows local account database and obtain a user token. The service must run as `LocalSystem` to call `CreateProcessAsUser` with that token.
+  Calls `LogonUserW` via `ctypes` to validate the credentials against the Windows local account database and obtain a user token. The service must run as `LocalSystem` to call `CreateProcessAsUser` with that token.
 
 ### Practical Consequence
 
 - **All stock client pairings use plaintext password submission inside `MSG_AUTH_LOGIN`.**
-- **Windows server authentication is stricter in practice because token creation still requires Windows password verification after any BSH-database check.**
+- **The stock client paths all rely on native OS password verification before session encryption starts.**
 
 Important: the current client/server implementation does not perform an extra Diffie-Hellman or RSA exchange before OS authentication. The password is sent in the `MSG_AUTH_LOGIN` payload before the AES session key becomes active. The surrounding Bluetooth pairing and transport behavior therefore matter to the threat model.
 
@@ -151,7 +151,7 @@ flowchart LR
 - Server-side verification:
   The Windows server calls `LogonUserW` with the provided plaintext password to obtain a Windows token.
 - Consequence:
-  A custom HMAC-proof-only client would still not be enough for the current Windows server path unless the server were changed, because the Windows token step still needs the password.
+  This path performs native OS password authentication before AES session encryption begins.
 - Important quirk:
   The Windows server advertises `pty`, but the actual shell path is pipe-based `cmd.exe` rather than a true PTY.
 - Input model:
@@ -195,7 +195,7 @@ flowchart LR
 - Server-side verification:
   The Linux server verifies the password against PAM or `/etc/shadow`.
 - Consequence:
-  Linux has helper support for proof verification, but the stock Windows client cannot use it because the protocol does not send salt.
+  This path still performs native OS password authentication before AES session encryption begins.
 - Input model:
   The Windows client disables local echo and forwards keystrokes toward the remote PTY instead of doing local line editing.
 - Output model:
@@ -231,7 +231,7 @@ flowchart LR
 - Transport setup:
   The Linux client uses Python `socket.AF_BLUETOOTH` / `BTPROTO_RFCOMM`.
 - Channel discovery:
-  It tries PyBluez SDP lookup first when available, then `sdptool`, then RFCOMM channel scan, then manual entry.
+  It tries PyBluez SDP lookup first when available, then `sdptool`, then RFCOMM channel scan across `1..12`, then manual entry.
 - Hello semantics:
   The Windows server again reports `os = "Windows"` and advertises `["pty", "signals", "password"]`, even though size changes are not applied to a real PTY.
 - Auth semantics:
@@ -259,12 +259,7 @@ sequenceDiagram
     LS->>LC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
     LC->>LS: MSG_HELLO {"name":"BSH-Linux-Client"}
     LC->>LS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
-    alt username exists in BSH DB
-        Note over LS: Verify BSH DB password only, then map to system user
-        Note over LS: Check mapped OS user exists
-    else username not in BSH DB
-        Note over LS: Verify against PAM or /etc/shadow
-    end
+    Note over LS: Verify against PAM or /etc/shadow
     LS->>LC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
     Note over LC,LS: Post-auth payload encryption begins
 ```
@@ -284,9 +279,9 @@ flowchart LR
 - Auth semantics:
   Even on the most Linux-native path, the stock Linux client still sends plaintext password JSON because the server does not publish salt in the protocol.
 - Server-side verification:
-  Linux can authenticate BSH-database users without rechecking the mapped OS password, but only the helper code knows how to validate `proof`, and the stock client never sends it.
+  The Linux server verifies the supplied password against PAM or `/etc/shadow`.
 - Consequence:
-  The current Linux-to-Linux path is operationally plaintext-password auth before AES activation, even though the server code contains dormant support for proof verification.
+  The current Linux-to-Linux path is operationally plaintext-password auth before AES activation.
 - Input model:
   The Linux client runs in raw terminal mode and forwards keystrokes character-by-character.
 - Output model:
@@ -300,7 +295,7 @@ flowchart LR
 
 | Pair | Auth Payload Sent By Stock Client | Server-Side Auth Reality | Remote Shell Model | `MSG_WINDOW_SIZE` | Notes |
 |---|---|---|---|---|---|
-| Windows client -> Windows server | `{"password":"<plaintext>"}` | Optional BSH DB check plus mandatory `LogonUserW` token acquisition | `cmd.exe` via pipes | Sent, ignored | No salt on wire; proof path not usable by stock client |
-| Windows client -> Linux server | `{"password":"<plaintext>"}` | BSH DB check or PAM/shadow fallback | Linux PTY | Sent, applied | Linux could verify proof, but stock client cannot compute one from the protocol |
-| Linux client -> Windows server | `{"password":"<plaintext>"}` | Optional BSH DB check plus mandatory `LogonUserW` token acquisition | `cmd.exe` via pipes | Sent, ignored | Client OS changes terminal behavior, not auth semantics |
-| Linux client -> Linux server | `{"password":"<plaintext>"}` | BSH DB check or PAM/shadow fallback | Linux PTY | Sent, applied | Most complete PTY path, but still plaintext-password auth today |
+| Windows client -> Windows server | `{"password":"<plaintext>"}` | `LogonUserW` token acquisition | `cmd.exe` via pipes | Sent, ignored | Native OS password auth before AES activation |
+| Windows client -> Linux server | `{"password":"<plaintext>"}` | PAM or `/etc/shadow` fallback | Linux PTY | Sent, applied | Native OS password auth before AES activation |
+| Linux client -> Windows server | `{"password":"<plaintext>"}` | `LogonUserW` token acquisition | `cmd.exe` via pipes | Sent, ignored | Client OS changes terminal behavior, not auth semantics |
+| Linux client -> Linux server | `{"password":"<plaintext>"}` | PAM or `/etc/shadow` fallback | Linux PTY | Sent, applied | Most complete PTY path, but still plaintext-password auth today |

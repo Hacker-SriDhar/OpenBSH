@@ -1,6 +1,6 @@
 # Linux Server Setup
 
-OpenBSH runs as a native systemd service on Linux, providing seamless, unprivileged SSH-style access over Bluetooth.
+OpenBSH runs as a native systemd service on Linux, providing seamless SSH-style access over Bluetooth.
 
 ## Prerequisites
 
@@ -46,14 +46,15 @@ sudo bash install.sh
 ```
 
 ### What the script does:
-- Installs Python dependencies (`cryptography`, `python-pam`, `PyBluez`) globally.
-- Copies the core BSH python files to `/opt/bsh/`.
+- Installs Python dependencies (`cryptography`, `python-pam`, and PyBluez if available) globally.
+- Tries PyBluez from GitHub first, then falls back to PyPI, and continues with a warning if PyBluez cannot be installed.
+- Copies the core BSH Python files to `/opt/bsh/`.
 - Creates necessary state directories: `/var/lib/bsh/`, `/var/log/bsh/`, `/run/bsh/`, `/etc/bsh/`.
 - Generates a default configuration file at `/etc/bsh/config.json`.
 - Installs and enables the `bsh.service` systemd unit.
 
 > [!NOTE]
-> OpenBSH **must** run as root (UID 0) to properly hook into PAM and to impersonate the logged-in user via `setuid` / `setgid`.
+> OpenBSH **must** run as root (UID 0) to properly hook into PAM and to impersonate the logged-in user via `setuid` and `setgid`.
 
 ---
 
@@ -63,19 +64,19 @@ The main configuration file is located at `/etc/bsh/config.json`.
 
 ```json
 {
-  "channel":   1,
+  "channel": 1,
   "log_level": "DEBUG",
-  "log_file":  "/var/log/bsh/bsh_service.log"
+  "log_file": "/var/log/bsh/bsh_service.log"
 }
 ```
 
 | Key | Default | Description |
 |---|---|---|
-| `channel` | `1` | RFCOMM channel to bind. The server auto-scans 1–30 if the preferred channel is busy. |
+| `channel` | `1` | RFCOMM channel to bind. The Linux server auto-scans `1..30` if the preferred channel is busy. |
 | `log_level` | `DEBUG` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
 | `log_file` | `/var/log/bsh/bsh_service.log` | Path to the log file. |
 
-If you modify this file, you must restart the service:
+If you modify this file, restart the service:
 ```bash
 sudo systemctl restart bsh
 ```
@@ -84,7 +85,7 @@ sudo systemctl restart bsh
 
 ## Service Management
 
-OpenBSH on Linux relies on `systemd` for lifecycle management, though you can use the built-in python script as well.
+OpenBSH on Linux relies on `systemd` for lifecycle management, though you can use the built-in Python script as well.
 
 ### Using Systemd (Recommended)
 ```bash
@@ -122,24 +123,12 @@ This script:
 3. Restarts `bluetoothd` and verifies the flag is active.
 
 > [!NOTE]
-> Without `--compat`, SDP advertisement is skipped and clients must specify the channel explicitly using the `-p` flag (e.g. `bsh_client_linux.py user@MAC -p 1`).
+> Without `--compat`, SDP advertisement is skipped and clients must specify the channel explicitly using the `-p` flag, for example `bsh_client_linux.py user@MAC -p 1`.
 
 ---
 
 ## User Management
 
-By default, OpenBSH authenticates against native Linux OS accounts via PAM
-(or `/etc/shadow` as a fallback). **Any existing Linux system user can log in
-over BSH using their regular system password** — no additional user setup is
-required.
+By default, OpenBSH authenticates against native Linux OS accounts via PAM or `/etc/shadow` as a fallback. **Any existing Linux system user can log in over BSH using their regular system password** - no additional user setup is required.
 
-> [!NOTE]
-> A standalone BSH password database (`bsh_password.py`) is planned for a
-> future release. It will allow granting Bluetooth access using credentials
-> independent of system passwords. Until then, use native OS accounts.
-
-> [!IMPORTANT]
-> When adding a standalone user (in a future release), the username must
-> either perfectly match an existing system user, OR you must explicitly map
-> it to an existing system user. If the mapping does not exist, the shell
-> will fail to spawn.
+When authentication succeeds, the service reads the target user's login shell from `/etc/passwd` and launches that shell as a login session. If the account does not define a shell, OpenBSH falls back to `/bin/bash`.

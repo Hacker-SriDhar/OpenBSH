@@ -1,6 +1,6 @@
 # OpenBSH: Bluetooth Shell
 
-Welcome to the official documentation for **OpenBSH** — a robust, cross-platform Bluetooth Shell service. 
+Welcome to the official documentation for **OpenBSH** - a robust, cross-platform Bluetooth Shell service.
 
 OpenBSH provides secure, SSH-style remote shell access over Bluetooth RFCOMM, enabling powerful out-of-band management for systems where network access is unavailable, restricted, or compromised.
 
@@ -11,10 +11,10 @@ In many secure or edge environments, traditional IP networks (Wi-Fi, Ethernet) m
 ### Key Features
 
 - **Cross-Platform Support:** Fully functional server implementations for both **Windows** (as a Windows Service) and **Linux** (as a Systemd Daemon), along with cross-platform Python clients.
-- **Enterprise-Grade Security:** All post-authentication traffic is encrypted using **AES-256-GCM** with a fresh random session key per connection. Standalone passwords are stored with PBKDF2-HMAC-SHA256.
+- **Enterprise-Grade Security:** All post-authentication traffic is encrypted using **AES-256-GCM** with a fresh random session key per connection. The shared crypto layer also includes a PBKDF2-HMAC-SHA256 helper, though the current release authenticates against native OS accounts rather than a standalone BSH password database.
 - **SSH-Style PTY Experience:** Enjoy an interactive shell experience with pseudo-terminal (PTY) emulation, supporting standard shell utilities, command history, and continuous output.
 - **Dynamic Adaptive Clients:** The clients auto-detect the target server OS (`Linux` or `Windows`) and seamlessly switch their input handling model between pure raw PTY pass-through and a local line-buffered history editor for optimal interactivity.
-- **Native OS Integration:** 
+- **Native OS Integration:**
     - **Windows:** Integrates with `win32serviceutil`, uses `CreateProcessAsUser` for shell impersonation, and authenticates with `LogonUserW`.
     - **Linux:** Integrates with Systemd, uses `pty.openpty` for terminal emulation, and supports PAM authentication with `/etc/shadow` fallback.
 
