@@ -427,7 +427,7 @@ def _generate_unit_file(config: dict, script_path: str) -> str:
     return f"""\
 [Unit]
 Description={SERVICE_LABEL}
-Documentation=https://github.com/your-org/openbsh
+Documentation=https://hacker-sridhar.github.io/OpenBSH/
 After=network.target bluetooth.target
 Wants=bluetooth.target
 

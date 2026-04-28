@@ -24,7 +24,8 @@ Packet wire format
   └──────┴────────┴──────┴─────────┴──────────┘
   SOF      = 0xAA
   Length   = len(Payload), big-endian uint16
-  Checksum = XOR of all header bytes + all payload bytes
+  Checksum = XOR of Length(2B) + Type(1B) + all payload bytes
+             (SOF byte intentionally excluded)
 
 Authentication flows
 ────────────────────

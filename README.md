@@ -64,7 +64,7 @@ The OpenBSH client provides the interactive terminal interface. You must use the
 1. Navigate to the `Client/` directory.
 2. Install dependencies:
    - **Windows:** `pip install cryptography`
-   - **Linux:** `sudo apt install libbluetooth-dev` and `pip3 install cryptography`
+   - **Linux:** `pip3 install cryptography` (optionally `sudo apt install libbluetooth-dev` for PyBluez SDP discovery)
 
 ### Connecting to a Server
 
@@ -84,22 +84,6 @@ If your server is running on a custom RFCOMM channel, append `-p <channel>`:
 
 ```bash
 python3 bsh_client_linux.py username@00:11:22:33:44:55 -p 3
-```
-
----
-
-## Standalone Password Management
-
-If you prefer not to use your native OS passwords for Bluetooth access, OpenBSH includes a standalone password database. These BSH-specific users must be mapped to an existing OS account to spawn a shell.
-
-**Add a user (Linux):**
-```bash
-sudo python3 /opt/bsh/bsh_password.py adduser alice
-```
-
-**Add a user (Windows):**
-```powershell
-python bsh_password.py adduser alice
 ```
 
 ---

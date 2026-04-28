@@ -69,13 +69,10 @@ This will:
 - Write a default `/etc/bsh/config.json`
 - Install and enable the `bsh.service` systemd unit
 
-### 3. Add a user
+### 3. Authenticate as a system user
 
-```bash
-sudo python3 /opt/bsh/bsh_password.py adduser alice
-# or map to a different system user:
-sudo python3 /opt/bsh/bsh_password.py adduser bsh_alice --system-user alice
-```
+By default BSH authenticates against native OS accounts via PAM or `/etc/shadow`.
+Simply use an existing Linux username and password when connecting.
 
 ### 4. Start the service
 
@@ -120,12 +117,14 @@ sudo systemctl restart bsh
 
 ## User management
 
-```bash
-python3 /opt/bsh/bsh_password.py adduser  alice
-python3 /opt/bsh/bsh_password.py passwd   alice
-python3 /opt/bsh/bsh_password.py list
-python3 /opt/bsh/bsh_password.py deluser  alice
-```
+By default, OpenBSH authenticates against native Linux OS accounts via PAM
+or `/etc/shadow`. Simply use an existing Linux username and its system password
+when connecting from a client.
+
+> [!NOTE]
+> A standalone BSH password database (`bsh_password.py`) is planned for a
+> future release. It will allow granting BSH access using separate credentials
+> that do not match the system password.
 
 ---
 
@@ -150,20 +149,16 @@ Then restart: `sudo systemctl restart bsh`
 
 ```
 Client                          Server
-  │── MSG_HELLO ──────────────────►│  (username, auth_method=password)
-  │◄── MSG_HELLO ──────────────────│  (name, version, features)
-  │── MSG_AUTH_PASSWORD_REQUEST ──►│
-  │◄── MSG_AUTH_PASSWORD_CHALLENGE─│  (32-byte random challenge)
-  │── MSG_AUTH_PASSWORD_RESPONSE ─►│  (current clients send password payload)
-  │◄── MSG_AUTH_SUCCESS ───────────│  (AES-256-GCM session key)
+  │── MSG_HELLO ──────────────────►│  {username, auth_method="password", name, version}
+  │◄── MSG_HELLO ──────────────────│  {name, version, os, features}
+  │── MSG_AUTH_LOGIN ─────────────►│  {username, password (plaintext)}
+  │◄── MSG_AUTH_SUCCESS ───────────│  {status, username, session_key (hex)}
+  │     OR MSG_AUTH_FAILURE ───────│  {error}
   │═══════ Encrypted shell I/O ════│
 ```
 
-If the username is in the **BSH password DB** (`/var/lib/bsh/passwords`),
-authentication happens against that DB.
-
-If the username is **not** in the BSH DB, the server tries **PAM**
-(`python-pam`) and, if unavailable, falls back to `/etc/shadow` directly.
+The server verifies credentials via **PAM** (`python-pam`) and, if PAM is
+unavailable, falls back to `/etc/shadow` directly (requires root).
 
 ---
 
@@ -187,6 +182,6 @@ If the username is **not** in the BSH DB, the server tries **PAM**
 | `ModuleNotFoundError: bluetooth` | PyBluez not installed — SDP advertisement/discovery is reduced, but direct channel connections still work |
 | `RFCOMM bind failed` | BlueZ not running: `sudo systemctl start bluetooth` |
 | `PAM auth failed` | Install python-pam or run as root for shadow fallback |
-| `User not found` | Add user to BSH DB: `bsh_password.py adduser <name>` |
+| `User not found` | Use a valid local Linux OS account username |
 | `Permission denied` on log/data dirs | Run service as root (`sudo systemctl start bsh`) |
 | No BT adapter detected | `hciconfig -a` to list adapters; `bluetoothctl power on` |

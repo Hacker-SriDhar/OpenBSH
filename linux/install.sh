@@ -128,12 +128,11 @@ echo
 echo "[5/7] Copying BSH files to $INSTALL_DIR …"
 mkdir -p "$INSTALL_DIR"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for f in bsh_crypto.py bsh_protocol.py bsh_password.py bsh_server_service.py bsh_service.py; do
+for f in bsh_crypto.py bsh_protocol.py bsh_server_service.py bsh_service.py; do
     cp "$SOURCE_DIR/$f" "$INSTALL_DIR/"
     ok "Copied $f"
 done
 chmod 750 "$INSTALL_DIR/bsh_service.py"
-chmod 750 "$INSTALL_DIR/bsh_password.py"
 
 # 6. Create directories and config
 echo

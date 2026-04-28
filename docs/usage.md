@@ -11,8 +11,13 @@ The OpenBSH daemon runs in the background. Depending on your operating system, y
     # View the status of the service
     systemctl status bsh
 
-    # Follow the logs in real-time
+    # Follow the logs in real-time (systemd journal)
     journalctl -u bsh -f
+
+    # Alternative: Python log viewer (no sudo needed)
+    python3 /opt/bsh/bsh_service.py logs
+    python3 /opt/bsh/bsh_service.py logs --follow   # tail -f style
+    python3 /opt/bsh/bsh_service.py logs -n 100      # last 100 lines
     ```
 
 === "Windows (Service MMC)"
@@ -28,53 +33,16 @@ The OpenBSH daemon runs in the background. Depending on your operating system, y
 
 ## Authentication Modes
 
-OpenBSH supports two primary modes of authentication:
+OpenBSH supports two modes of authentication:
 
 1. **Native OS Authentication (Default):**
     - On Windows, OpenBSH uses the `LogonUserW` API to verify the target Windows account password.
     - On Linux, OpenBSH uses PAM when available and falls back to `/etc/shadow`-based verification when running with sufficient privileges.
 
-2. **Standalone BSH Database:**
-    - OpenBSH ships with its own highly secure, standalone password database (`bsh_password.py`). 
-    - This is useful if you want to grant BSH access using a *different* password than the system password, or if you want to strictly control which users can access the system via Bluetooth.
-    - Standalone users *must* map to a valid OS user account, because OpenBSH needs a valid OS context to impersonate and spawn the shell.
-
----
-
-## Managing Standalone Users
-
-If you choose to use the Standalone Database, you manage users via the `bsh_password.py` utility.
-
-> [!NOTE]
-> On Linux, the utility is located at `/opt/bsh/bsh_password.py` and requires `sudo`. On Windows, it is located in your installation directory and requires an Administrator prompt.
-
-### Add a New User
-```bash
-python bsh_password.py adduser johndoe
-```
-*This assumes that the OS account "johndoe" already exists.*
-
-### Map to a Different OS User
-If you want the BSH username to be different from the OS username:
-```bash
-python bsh_password.py adduser bsh_admin --system-user root
-```
-*When `bsh_admin` logs in, they will be dropped into a `root` shell.*
-
-### Change a Password
-```bash
-python bsh_password.py passwd johndoe
-```
-
-### List Users
-```bash
-python bsh_password.py list
-```
-
-### Delete a User
-```bash
-python bsh_password.py deluser johndoe
-```
+2. **Standalone BSH Password Database** *(not yet available in this release):*
+    - A standalone BSH password database (`bsh_password.py`) is planned for a future release.
+    - When available, it will allow granting BSH access using a password independent of the system password.
+    - Standalone users will still need to map to a valid OS user account so that OpenBSH can impersonate and spawn the shell.
 
 ---
 

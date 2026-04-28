@@ -59,16 +59,21 @@ sudo bash install.sh
 
 ## Configuration
 
-The main configuration file is located at `/etc/bsh/config.json`. 
+The main configuration file is located at `/etc/bsh/config.json`.
 
 ```json
 {
-  "channel":       1,
-  "log_level":     "DEBUG",
-  "password_file": "/var/lib/bsh/passwords",
-  "log_file":      "/var/log/bsh/bsh_service.log"
+  "channel":   1,
+  "log_level": "DEBUG",
+  "log_file":  "/var/log/bsh/bsh_service.log"
 }
 ```
+
+| Key | Default | Description |
+|---|---|---|
+| `channel` | `1` | RFCOMM channel to bind. The server auto-scans 1–30 if the preferred channel is busy. |
+| `log_level` | `DEBUG` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
+| `log_file` | `/var/log/bsh/bsh_service.log` | Path to the log file. |
 
 If you modify this file, you must restart the service:
 ```bash
@@ -101,26 +106,40 @@ tail -f /var/log/bsh/bsh_service.log
 
 ---
 
-## User Management
+## Bluetooth SDP Advertisement (Optional)
 
-By default, OpenBSH will attempt to authenticate against the native Linux PAM module (or fallback to `/etc/shadow`). However, you can manage standalone BSH users using the built-in password database.
+By default, the BSH server attempts to register itself in the BlueZ SDP database so clients can auto-discover its RFCOMM channel. On modern BlueZ 5+ systems, `bluetoothd` must be started with the `--compat` flag for SDP registration to work.
+
+A helper script is included to configure this automatically:
 
 ```bash
-# Add a standalone BSH user
-sudo python3 /opt/bsh/bsh_password.py adduser alice
-
-# Add a BSH user mapped to a specific system user
-sudo python3 /opt/bsh/bsh_password.py adduser bsh_alice --system-user alice
-
-# List users
-sudo python3 /opt/bsh/bsh_password.py list
-
-# Change password
-sudo python3 /opt/bsh/bsh_password.py passwd alice
-
-# Delete user
-sudo python3 /opt/bsh/bsh_password.py deluser alice
+sudo bash /opt/bsh/setup_bluetooth_compat.sh
 ```
 
+This script:
+1. Detects the `bluetoothd` binary path.
+2. Writes a systemd drop-in at `/etc/systemd/system/bluetooth.service.d/compat.conf` that adds the `--compat` flag.
+3. Restarts `bluetoothd` and verifies the flag is active.
+
+> [!NOTE]
+> Without `--compat`, SDP advertisement is skipped and clients must specify the channel explicitly using the `-p` flag (e.g. `bsh_client_linux.py user@MAC -p 1`).
+
+---
+
+## User Management
+
+By default, OpenBSH authenticates against native Linux OS accounts via PAM
+(or `/etc/shadow` as a fallback). **Any existing Linux system user can log in
+over BSH using their regular system password** — no additional user setup is
+required.
+
+> [!NOTE]
+> A standalone BSH password database (`bsh_password.py`) is planned for a
+> future release. It will allow granting Bluetooth access using credentials
+> independent of system passwords. Until then, use native OS accounts.
+
 > [!IMPORTANT]
-> When adding a standalone user, the username must either perfectly match an existing system user (e.g., `alice`), OR you must explicitly map it to an existing system user using `--system-user`. If the mapping does not exist, the shell will fail to spawn.
+> When adding a standalone user (in a future release), the username must
+> either perfectly match an existing system user, OR you must explicitly map
+> it to an existing system user. If the mapping does not exist, the shell
+> will fail to spawn.

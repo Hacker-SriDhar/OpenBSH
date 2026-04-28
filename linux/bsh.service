@@ -1,6 +1,6 @@
 [Unit]
 Description=BSH Bluetooth Shell Service
-Documentation=https://github.com/your-org/openbsh
+Documentation=https://hacker-sridhar.github.io/OpenBSH/
 After=network.target bluetooth.target
 Wants=bluetooth.target
 

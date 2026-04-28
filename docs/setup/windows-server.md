@@ -47,6 +47,12 @@ You can manage the service using the provided Python script, the Windows Service
 
 ### Using Python Command Line
 ```powershell
+# Install (or reinstall) the service
+python bsh_service.py install
+
+# Update (alias for install — re-registers the service)
+python bsh_service.py update
+
 # Start the service
 python bsh_service.py start
 
@@ -55,6 +61,13 @@ python bsh_service.py stop
 
 # Restart the service
 python bsh_service.py restart
+
+# View status and recent logs
+python bsh_service.py status
+
+# View logs (tail style)
+python bsh_service.py logs
+python bsh_service.py logs --follow
 ```
 
 ### Using Windows Built-ins
@@ -78,12 +91,9 @@ To connect from a client, simply use your Windows username and password.
 
 In practice, the current client flow is simplest when the username matches the Windows account name expected by the server configuration.
 
-### The Standalone BSH Password DB (Optional)
-If you wish to use passwords independent of the Windows system, you can use the built-in password database. Similar to the Linux version, these users will still need to be mapped to a legitimate Windows system user.
+### Standalone BSH Password Database *(planned — not yet available)*
 
-```powershell
-python bsh_password.py adduser standalone_bsh_user
-```
+A future release of OpenBSH will include an optional standalone password database that allows BSH credentials independent of Windows account passwords. Until then, use native Windows account credentials to authenticate.
 
 ---
 

@@ -72,8 +72,9 @@ The protocol defines the following core message types:
 | `0x10` | `MSG_DATA_IN` | Client sends shell input. |
 | `0x11` | `MSG_DATA_OUT` | Server sends shell stdout. |
 | `0x12` | `MSG_DATA_ERR` | Server sends shell stderr. |
-| `0x20` | `MSG_INTERRUPT` | Client requests a shell interrupt. |
-| `0x21` | `MSG_WINDOW_SIZE` | Client sends terminal size information. |
+| `0x15` | `MSG_WINDOW_RESIZE` | Alias for `MSG_WINDOW_SIZE` — client requests a PTY resize. Handled identically to `0x21` by the Linux server. |
+| `0x20` | `MSG_INTERRUPT` | Client requests a shell interrupt (Ctrl+C). |
+| `0x21` | `MSG_WINDOW_SIZE` | Client sends terminal size information (rows × cols). |
 
 ---
 
@@ -85,14 +86,14 @@ The current wire protocol performs a simplified, single-step authentication. The
 {"username": "<name>", "password": "<plaintext>"}
 ```
 
-### Server-Side Authentication Split
+### Server-Side Authentication
 
-The important behavioral difference is not the client OS, but the server OS:
+The important behavioral difference is the server OS:
 
 - **Linux server:**
-  If the username exists in the BSH password database, the server can authenticate against that database and only checks that the mapped OS user exists before spawning the shell. If the username is not in the BSH database, it falls back to PAM or `/etc/shadow`.
+  Verifies credentials via PAM (`python-pam`). If PAM is unavailable, the server falls back to `/etc/shadow` directly (requires root). The process must run as root to call `setuid()`/`setgid()` and impersonate the authenticated user for the shell session.
 - **Windows server:**
-  Even if the username exists in the BSH password database, the server still calls `LogonUserW` for the mapped Windows account in order to obtain a usable Windows token. That means the live path still depends on the plaintext password field being present and valid for the mapped Windows account.
+  Calls `LogonUserW` (via ctypes) to validate the credentials against the Windows local account database and obtain a user token. The service must run as `LocalSystem` to call `CreateProcessAsUser` with that token.
 
 ### Practical Consequence
 
@@ -105,7 +106,7 @@ Important: the current client/server implementation does not perform an extra Di
 
 ## Dynamic Adaptive Session Behavior
 
-The packet framing, message IDs, challenge step, and AES-GCM payload format are shared across all supported client/server combinations. The practical differences appear after `MSG_HELLO`, when the clients dynamically detect the server's `os` and adapt their input handling model for terminal editing, resize packets, and shell I/O.
+The packet framing, message IDs, and AES-GCM payload format are shared across all supported client/server combinations. The practical differences appear after `MSG_HELLO`, when the clients dynamically detect the server's `os` and adapt their input handling model for terminal editing, resize packets, and shell I/O.
 
 ### Shared Behavior Across All Four Pairs
 
@@ -126,8 +127,7 @@ sequenceDiagram
     WS->>WC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
     WC->>WS: MSG_HELLO {"name":"BSH-Windows-Client"}
     WC->>WS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
-    Note over WS: Optional BSH DB check may run first
-    Note over WS: Server still calls LogonUserW(mapped_user, password)
+    Note over WS: Server calls LogonUserW(user, password)
     WS->>WC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
     Note over WC,WS: Post-auth payload encryption begins
 ```
@@ -147,9 +147,9 @@ flowchart LR
 - Hello semantics:
   The Windows server reports `os = "Windows"` and currently advertises `features = ["pty", "signals", "password"]`.
 - Auth semantics:
-  The challenge packet contains only `challenge`; no salt is transmitted. The current Windows client responds with plaintext password JSON.
+  The current Windows client sends the password in plaintext JSON inside the initial authentication request.
 - Server-side verification:
-  If the BSH password database contains the username, the server may verify that database entry first, but it still has to call `LogonUserW` with the provided plaintext password to obtain a Windows token.
+  The Windows server calls `LogonUserW` with the provided plaintext password to obtain a Windows token.
 - Consequence:
   A custom HMAC-proof-only client would still not be enough for the current Windows server path unless the server were changed, because the Windows token step still needs the password.
 - Important quirk:
@@ -173,12 +173,7 @@ sequenceDiagram
     LS->>WC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
     WC->>LS: MSG_HELLO {"name":"BSH-Windows-Client"}
     WC->>LS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
-    alt username exists in BSH DB
-        Note over LS: Verify BSH DB password only, then map to system user
-        Note over LS: Check mapped OS user exists
-    else username not in BSH DB
-        Note over LS: Verify against PAM or /etc/shadow
-    end
+    Note over LS: Verify against PAM or /etc/shadow
     LS->>WC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
     Note over WC,LS: Post-auth payload encryption begins
 ```
@@ -196,9 +191,9 @@ flowchart LR
 - Hello semantics:
   The Linux server reports `os = "Linux"` and advertises `features = ["pty", "signals", "password"]`.
 - Auth semantics:
-  The Linux server also sends only `challenge`, not salt, so the stock Windows client still sends plaintext password JSON.
+  The Linux server expects the password in the `MSG_AUTH_LOGIN` payload, and the stock Windows client sends it as plaintext JSON.
 - Server-side verification:
-  If the username exists in the Linux BSH password database, Linux can authenticate there without requiring the mapped OS password. If the username is not in that database, Linux falls back to PAM or `/etc/shadow`.
+  The Linux server verifies the password against PAM or `/etc/shadow`.
 - Consequence:
   Linux has helper support for proof verification, but the stock Windows client cannot use it because the protocol does not send salt.
 - Input model:
@@ -220,8 +215,7 @@ sequenceDiagram
     WS->>LC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
     LC->>WS: MSG_HELLO {"name":"BSH-Linux-Client"}
     LC->>WS: MSG_AUTH_LOGIN {"username":"alice", "password":"<plaintext>"}
-    Note over WS: Optional BSH DB check may run first
-    Note over WS: Server still calls LogonUserW(mapped_user, password)
+    Note over WS: Server calls LogonUserW(user, password)
     WS->>LC: MSG_AUTH_SUCCESS {"session_key":"<hex>"} or MSG_AUTH_FAILURE
     Note over LC,WS: Post-auth payload encryption begins
 ```
@@ -241,9 +235,9 @@ flowchart LR
 - Hello semantics:
   The Windows server again reports `os = "Windows"` and advertises `["pty", "signals", "password"]`, even though size changes are not applied to a real PTY.
 - Auth semantics:
-  The Linux client receives only a `challenge` field and still sends `{"password":"<plaintext>"}`.
+  The Linux client sends the password as plaintext JSON in the `MSG_AUTH_LOGIN` payload.
 - Server-side verification:
-  As with the Windows-client path, the Windows server still depends on `LogonUserW` after any optional BSH-database check.
+  The Windows server depends on `LogonUserW`.
 - Consequence:
   The Linux client's raw terminal behavior does not change the authentication model; this path is still plaintext-password authentication before session encryption starts.
 - Input model:

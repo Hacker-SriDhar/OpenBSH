@@ -35,12 +35,14 @@ There is no formal installation process for the client. The client is a standalo
 ### Project Structure
 ```text
 Client/
-├── bsh_client.py           # Shared client implementation
-├── bsh_client_windows.py   # Windows-specific client logic
-├── bsh_client_linux.py     # Linux-specific client logic
-├── bsh_protocol.py         # The shared wire protocol
-└── bsh_crypto.py           # The shared cryptography library
+├── bsh_client_windows.py   # Windows client (self-contained)
+├── bsh_client_linux.py     # Linux client (self-contained)
+├── bsh_protocol.py         # Shared wire protocol
+└── bsh_crypto.py           # Shared AES-256-GCM cryptography
 ```
+
+> [!NOTE]
+> Each client script is fully self-contained. There is no shared `bsh_client.py` base module.
 
 ---
 
@@ -92,6 +94,15 @@ python3 bsh_client_linux.py user@00:11:22:33:44:55 -p 3
 
 > [!TIP]
 > The OpenBSH client provides a highly responsive PTY experience. If connecting to a Linux server, the client will automatically disable local terminal echo, relying entirely on the server's PTY to render keystrokes, ensuring that programs like `vim`, `nano`, and `htop` work flawlessly.
+
+### Linux Client: Additional Flags
+
+```bash
+# Skip SDP discovery and channel scan entirely — connect straight to channel 1
+python3 bsh_client_linux.py user@AA:BB:CC:DD:EE:FF --no-discover
+```
+
+Use `--no-discover` when the server's SDP service is not advertised (e.g. running without `--compat` bluetoothd mode) and you know the channel number is `1`.
 
 ---
 

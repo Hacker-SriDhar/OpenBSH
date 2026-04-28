@@ -89,7 +89,11 @@ sequenceDiagram
 
 1. **Hello Exchange:** Both sides advertise their version and OS capabilities. This is critical for clients to adjust their terminal emulation (e.g., disabling local echo if the server is Linux).
 2. **Password Exchange:** The client sends a single `MSG_AUTH_LOGIN` packet carrying the username and plaintext password inside the BSH packet payload.
-3. **Session Key Negotiation:** If authentication succeeds, the server generates a random AES-256 session key and sends it to the client. From this moment, subsequent packet payloads are encrypted.
+3. **Session Key Negotiation:** If authentication succeeds, the server generates a random AES-256 session key and sends it to the client inside `MSG_AUTH_SUCCESS`. From this moment, subsequent packet payloads are encrypted.
+
+**Server-side verification by OS:**
+- **Linux:** Authenticates via PAM (`python-pam`). Falls back to `/etc/shadow` if PAM is unavailable (requires root). Drops to the authenticated user's UID/GID via `setuid()`/`setgid()` to spawn the shell.
+- **Windows:** Calls `LogonUserW` to validate credentials and obtain a Windows user token, then uses `CreateProcessAsUser` to spawn `cmd.exe` under that user's context.
 
 ---
 
