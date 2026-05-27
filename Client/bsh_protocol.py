@@ -32,9 +32,7 @@ Packet wire format
 
 Authentication flow (password)
 ────────────────────────────────
-  Client → MSG_AUTH_PASSWORD_REQUEST   {}
-  Server → MSG_AUTH_PASSWORD_CHALLENGE {challenge: <32-byte hex>}
-  Client → MSG_AUTH_PASSWORD_RESPONSE  {password: <plaintext>}
+  Client → MSG_AUTH_LOGIN              {username: <name>, password: <plaintext>}
   Server → MSG_AUTH_SUCCESS            {status, username, session_key: <hex>}
         OR MSG_AUTH_FAILURE            {error}
 
@@ -64,9 +62,7 @@ class MessageType(IntEnum):
     MSG_AUTH_FAILURE   = 0x08   # Server → Client: error message
 
     # ── Password authentication ──────────────────────────────
-    MSG_AUTH_PASSWORD_REQUEST   = 0x09  # Client → Server
-    MSG_AUTH_PASSWORD_CHALLENGE = 0x0A  # Server → Client
-    MSG_AUTH_PASSWORD_RESPONSE  = 0x0B  # Client → Server
+    MSG_AUTH_LOGIN     = 0x09   # Client → Server: username and plaintext password
 
     # ── Data streams ─────────────────────────────────────────
     MSG_DATA_IN  = 0x10   # Client → Server  (stdin)

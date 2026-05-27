@@ -68,7 +68,6 @@ DEFAULT_CONFIG = {
     'log_dir':         r'C:\ProgramData\BSH\logs',
     'log_file':        r'C:\ProgramData\BSH\logs\bsh_service.log',
     'channel':         1,
-    'password_file':   r'C:\ProgramData\BSH\passwords',
     'log_level':       'DEBUG',   # DEBUG | INFO | WARNING | ERROR
 }
 
@@ -203,7 +202,6 @@ class BSHService(win32serviceutil.ServiceFramework):
         self.logger.info("PID            : %d", os.getpid())
         self.logger.info("Running as     : %s", os.environ.get('USERNAME', 'SYSTEM'))
         self.logger.info("Channel        : %d", self.config['channel'])
-        self.logger.info("Password file  : %s", self.config['password_file'])
         self.logger.info("Log file       : %s", self.config['log_file'])
         self.logger.info("Log level      : %s", self.config.get('log_level', 'DEBUG'))
         self.logger.info("=" * 60)
@@ -229,7 +227,6 @@ class BSHService(win32serviceutil.ServiceFramework):
         try:
             self.logger.info("Creating BSHHostService instance …")
             self.bsh_host = BSHHostService(
-                password_file=self.config['password_file'],
                 channel=self.config['channel'],
             )
             self.logger.info("BSHHostService instance created")
@@ -340,8 +337,6 @@ def show_status():
 
     print()
     print("  Files:")
-    print(f"    Password File  : {config['password_file']}")
-    print(f"                     {file_status(config['password_file'])}")
     print(f"    Log File       : {config['log_file']}")
     print(f"                     {file_status(config['log_file'])}")
 
@@ -472,7 +467,6 @@ def _setup_environment() -> None:
         default_config = {
             'channel':         1,
             'log_level':       'DEBUG',
-            'password_file':   config['password_file'],
             'log_file':        config['log_file'],
         }
         with open(config_file, 'w', encoding='utf-8') as fh:

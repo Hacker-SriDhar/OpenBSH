@@ -18,9 +18,8 @@ BSH Host Service — Linux version with PTY shell and user impersonation.
 
 Authentication supported
 ─────────────────────────
-  • BSH password DB — PBKDF2-HMAC-SHA256 with HMAC challenge-response
-  • PAM               — system authentication for non-BSH-DB users
-                        (requires python-pam:  pip install python-pam)
+  • Direct OS authentication via PAM or /etc/shadow
+    (requires python-pam for PAM support: pip install python-pam)
 
 Shell
 ─────
@@ -54,10 +53,9 @@ from datetime import datetime
 from pathlib import Path
 
 from bsh_protocol import (
-    BSHPacket, MessageType, BSHAuthenticator,
+    BSHPacket, MessageType,
     create_hello_packet, create_data_packet,
 )
-from bsh_password import BSHPasswordAuth
 from bsh_crypto import BSHCrypto
 
 
@@ -68,7 +66,6 @@ from bsh_crypto import BSHCrypto
 BASE_DIR         = Path('/var/lib/bsh')
 LOG_DIR          = Path('/var/log/bsh')
 RUN_DIR          = Path('/run/bsh')
-DEFAULT_PW_FILE  = '/var/lib/bsh/passwords'
 RUNTIME_JSON     = RUN_DIR / 'runtime.json'
 LOG_FILE         = LOG_DIR / 'bsh_service.log'
 
@@ -515,33 +512,27 @@ class BSHHostService:
 
     Authentication flow
     ───────────────────
-      1. BSH password DB lookup first (if the username exists in the DB the
-         BSH password is used exclusively — no PAM call is made).
-      2. If the username is NOT in the BSH DB, PAM authentication is
-         attempted against the OS user database.
-
-    This mirrors the OpenSSH model where local key/password files take
-    precedence over PAM.
+      1. Wait for MSG_AUTH_LOGIN containing username and plaintext password.
+      2. Verify the credentials directly against the local OS user database.
+      3. On success, send MSG_AUTH_SUCCESS with a fresh session key and
+         encrypt all subsequent traffic with AES-256-GCM.
     """
 
     def __init__(
         self,
-        password_file: str = None,
         channel: int = 1,
+        **kwargs
     ):
         self._log       = logging.getLogger('BSHServer.HostService')
         self.linux_auth = LinuxAuthService()
         self.crypto     = BSHCrypto()
-
-        self.password_file = password_file or DEFAULT_PW_FILE
-        self.password_auth: BSHPasswordAuth | None = None
 
         self.server_sock        = None
         self.client_sock        = None
         self._client_addr       = None
         self.running            = False
         self.authenticated_user = None        # BSH username
-        self.authenticated_sys_user = None    # OS username (may differ)
+        self.authenticated_sys_user = None    # OS username
         self.session_key: bytes | None = None
         self._encrypted         = False
         self._send_lock         = threading.Lock()
@@ -549,21 +540,9 @@ class BSHHostService:
         self.bound_channel      = None
         self._runtime_file      = RUNTIME_JSON
 
-        self._load_password_db()
-
     # ── Initialisation helpers ────────────────────────────────────────────────
 
-    def _load_password_db(self):
-        try:
-            self.password_auth = BSHPasswordAuth(self.password_file)
-            n = len(self.password_auth.users)
-            if n:
-                self._log.info("Loaded %d password user(s) from %s", n, self.password_file)
-            else:
-                self._log.info("Password DB loaded but empty: %s", self.password_file)
-        except Exception as exc:
-            self._log.warning("Could not load password DB (%s): %s", self.password_file, exc)
-            self.password_auth = None
+    
 
     def _create_rfcomm_socket(self):
         if _HAS_PYBLUEZ:
@@ -583,7 +562,7 @@ class BSHHostService:
         except Exception:
             self._log.info("Running as UID : %d", os.getuid())
         self._log.info("Requested channel : %d", channel)
-        self._log.info("Auth modes : BSH password DB + PAM/shadow")
+        self._log.info("Auth modes :  PAM/shadow")
         self._log.info("=" * 60)
 
         self.server_sock = self._create_rfcomm_socket()
@@ -749,78 +728,49 @@ class BSHHostService:
 
     def authenticate_password(self, username: str, conn_id: int = 0) -> str | None:
         """
-        Run the BSH password-challenge handshake.
-
+        Single-step OS authentication via MSG_AUTH_LOGIN.
         Returns the OS username to run the shell as, or None on failure.
         """
+        # 1. Wait for MSG_AUTH_LOGIN
         pkt = self.receive_packet()
-        if not pkt or pkt.msg_type != MessageType.MSG_AUTH_PASSWORD_REQUEST:
-            self._send_failure('Expected MSG_AUTH_PASSWORD_REQUEST')
+        if not pkt or pkt.msg_type != MessageType.MSG_AUTH_LOGIN:
+            self._send_failure('Expected MSG_AUTH_LOGIN')
             return None
 
-        challenge = os.urandom(32)
-        self.send_packet(BSHPacket(
-            MessageType.MSG_AUTH_PASSWORD_CHALLENGE,
-            json.dumps({'challenge': challenge.hex()}).encode('utf-8'),
-        ))
-
-        resp = self.receive_packet()
-        if not resp or resp.msg_type != MessageType.MSG_AUTH_PASSWORD_RESPONSE:
-            self._send_failure('Expected MSG_AUTH_PASSWORD_RESPONSE')
-            return None
-
+        # 2. Extract credentials from payload
         try:
-            resp_data = json.loads(resp.payload.decode('utf-8'))
+            req_data = json.loads(pkt.payload.decode('utf-8'))
         except Exception:
-            self._send_failure('Malformed password response')
+            self._send_failure('Malformed login request')
             return None
 
-        password = resp_data.get('password', '')
+        password = req_data.get('password', '')
+        client_username = req_data.get('username', username)
 
-        # ── Authentication path ────────────────────────────────────────────────
+        # 3. Pass directly to Linux OS Auth (PAM / shadow)
+        if not self.linux_auth.user_exists(client_username):
+            self._send_failure('User not found on this system')
+            return None
+            
+        if not self.linux_auth.verify_password(client_username, password):
+            self._send_failure('Authentication failed')
+            return None
 
-        if self.password_auth and username in self.password_auth.users:
-            # BSH password DB: verify HMAC proof or plaintext password
-            proof = resp_data.get('proof')
-            if proof is not None:
-                if not self.password_auth.verify_password_proof(username, challenge, proof):
-                    self._send_failure('Authentication failed')
-                    return None
-            else:
-                if not self.password_auth.verify_password(username, password):
-                    self._send_failure('Authentication failed')
-                    return None
-
-            sys_user = self.password_auth.get_system_user(username)
-
-            # Make sure the mapped OS user actually exists
-            if not self.linux_auth.user_exists(sys_user):
-                self._send_failure(f"Mapped system user '{sys_user}' not found")
-                return None
-
-        else:
-            # Not in BSH DB — fall back to Linux system auth (PAM / shadow)
-            sys_user = username
-            if not self.linux_auth.user_exists(sys_user):
-                self._send_failure('User not found on this system')
-                return None
-            if not self.linux_auth.verify_password(sys_user, password):
-                self._send_failure('Authentication failed')
-                return None
-
-        # ── Issue session key ──────────────────────────────────────────────────
+        # 4. Success: Generate session key and send MSG_AUTH_SUCCESS
         self.session_key = self.crypto.generate_session_key()
 
         self.send_packet(BSHPacket(
             MessageType.MSG_AUTH_SUCCESS,
             json.dumps({
                 'status':      'authenticated',
-                'username':    username,
+                'username':    client_username,
                 'session_key': self.session_key.hex(),
             }).encode('utf-8'),
         ))
-        self._encrypted = True   # encrypt all subsequent packets
-        return sys_user
+        
+        # Activate payload encryption for subsequent packets
+        self._encrypted = True
+        return client_username
 
     # ── Shell session ─────────────────────────────────────────────────────────
 

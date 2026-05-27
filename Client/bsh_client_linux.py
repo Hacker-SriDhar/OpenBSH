@@ -274,39 +274,45 @@ class BSHLinuxClient:
 
     # ── Password authentication ───────────────────────────────────────────────
 
+    # ── Password authentication ───────────────────────────────────────────────
+
     def _authenticate_password(self) -> None:
+        """Single-step authentication sending username and password directly."""
         password = getpass.getpass(f"{self.username}'s password: ")
 
+        # 1. Construct and send MSG_AUTH_LOGIN packet
+        payload = json.dumps({
+            'username': self.username,
+            'password': password
+        }).encode('utf-8')
+        
         self.send_packet(BSHPacket(
-            MessageType.MSG_AUTH_PASSWORD_REQUEST,
-            json.dumps({}).encode(),
+            MessageType.MSG_AUTH_LOGIN, 
+            payload
         ))
 
-        challenge_pkt = self.receive_packet()
-        if not challenge_pkt:
-            raise RuntimeError("No challenge received from server")
-        if challenge_pkt.msg_type == MessageType.MSG_AUTH_FAILURE:
-            raise RuntimeError(json.loads(challenge_pkt.payload).get('error', 'Auth failed'))
-        if challenge_pkt.msg_type != MessageType.MSG_AUTH_PASSWORD_CHALLENGE:
-            raise RuntimeError(f"Unexpected packet type: {challenge_pkt.msg_type}")
-
-        self.send_packet(BSHPacket(
-            MessageType.MSG_AUTH_PASSWORD_RESPONSE,
-            json.dumps({'password': password}).encode(),
-        ))
-
+        # 2. Wait for server response
         result = self.receive_packet()
-        if result and result.msg_type == MessageType.MSG_AUTH_SUCCESS:
+        
+        if not result:
+            raise RuntimeError("Connection dropped during authentication.")
+
+        # 3. Handle Success or Failure
+        if result.msg_type == MessageType.MSG_AUTH_SUCCESS:
             self.authenticated = True
-            data = json.loads(result.payload.decode())
+            data = json.loads(result.payload.decode('utf-8'))
             if 'session_key' in data:
                 self.session_key = bytes.fromhex(data['session_key'])
                 print("  ✓ Session key established (AES-256-GCM)")
-        elif result and result.msg_type == MessageType.MSG_AUTH_FAILURE:
-            raise RuntimeError(json.loads(result.payload).get('error', 'Permission denied'))
+                
+        elif result.msg_type == MessageType.MSG_AUTH_FAILURE:
+            data = json.loads(result.payload.decode('utf-8'))
+            error_msg = data.get('error', 'Permission denied')
+            raise RuntimeError(error_msg)
+            
         else:
-            raise RuntimeError("Unexpected response during authentication")
-
+            raise RuntimeError(f"Unexpected response during authentication: {result.msg_type}")
+            
     # ── Interactive session ───────────────────────────────────────────────────
 
     def start_interactive_session(self) -> None:

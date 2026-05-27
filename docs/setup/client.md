@@ -1,8 +1,8 @@
 # Client Setup
 
-The OpenBSH Client is a Python-based utility that allows you to connect to an OpenBSH server over Bluetooth RFCOMM. 
+The OpenBSH Client is a Python-based utility that allows you to connect to an OpenBSH server over Bluetooth RFCOMM.
 
-Because the heavy lifting (PTY emulation, service management, user impersonation) is handled entirely by the server, the client is relatively lightweight and highly cross-platform.
+Because the heavy lifting such as PTY emulation, service management, and user impersonation is handled entirely by the server, the client is relatively lightweight and highly cross-platform.
 
 ## Prerequisites
 
@@ -35,22 +35,24 @@ There is no formal installation process for the client. The client is a standalo
 ### Project Structure
 ```text
 Client/
-├── bsh_client.py           # Shared client implementation
-├── bsh_client_windows.py   # Windows-specific client logic
-├── bsh_client_linux.py     # Linux-specific client logic
-├── bsh_protocol.py         # The shared wire protocol
-└── bsh_crypto.py           # The shared cryptography library
+|-- bsh_client_windows.py   # Windows client (self-contained)
+|-- bsh_client_linux.py     # Linux client (self-contained)
+|-- bsh_protocol.py         # Shared wire protocol
+`-- bsh_crypto.py           # Shared AES-256-GCM cryptography
 ```
+
+> [!NOTE]
+> Each client script is fully self-contained. There is no shared `bsh_client.py` base module.
 
 ---
 
 ## Basic Usage
 
-To connect to a server, you only need the target username and the Bluetooth MAC Address of the target machine. Ensure you are running the specific client script for your Operating System: `bsh_client_windows.py` for Windows, or `bsh_client_linux.py` for Linux.
+To connect to a server, you only need the target username and the Bluetooth MAC address of the target machine. Ensure you are running the specific client script for your operating system: `bsh_client_windows.py` for Windows, or `bsh_client_linux.py` for Linux.
 
 ### Finding the Server MAC Address
 
-If you don't know the MAC address of the target server, pairing the devices through the OS Bluetooth settings is usually the most reliable path. Command-line tools can also help, depending on platform support.
+If you do not know the MAC address of the target server, pairing the devices through the OS Bluetooth settings is usually the most reliable path. Command-line tools can also help, depending on platform support.
 
 **On the Server (Linux):**
 ```bash
@@ -78,7 +80,7 @@ python bsh_client_windows.py user@00:11:22:33:44:55
 python3 bsh_client_linux.py user@00:11:22:33:44:55
 ```
 
-If the server is running on a non-standard RFCOMM channel (the default is channel `1`), you can specify it manually:
+If the server is running on a non-standard RFCOMM channel, you can specify it manually:
 
 **From Windows:**
 ```powershell
@@ -91,4 +93,45 @@ python3 bsh_client_linux.py user@00:11:22:33:44:55 -p 3
 ```
 
 > [!TIP]
-> The OpenBSH client provides a highly responsive PTY experience. If connecting to a Linux server, the client will automatically disable local terminal echo, relying entirely on the server's PTY to render keystrokes, ensuring that programs like `vim`, `nano`, and `htop` work flawlessly.
+> The OpenBSH client provides a highly responsive PTY experience. If connecting to a Linux server, the client will automatically disable local terminal echo, relying entirely on the server's PTY to render keystrokes, ensuring that programs like `vim`, `nano`, and `htop` work cleanly.
+
+### Linux Client: Additional Flags
+
+```bash
+# Skip SDP discovery and channel scan entirely and connect straight to the chosen channel
+python3 bsh_client_linux.py user@AA:BB:CC:DD:EE:FF --no-discover
+python3 bsh_client_linux.py user@AA:BB:CC:DD:EE:FF -p 4 --no-discover
+```
+
+Use `--no-discover` when the server's SDP service is not advertised, for example when `bluetoothd` is running without `--compat`, and you already know the RFCOMM channel number. If you omit `-p`, the client still defaults to channel `1`.
+
+---
+
+## Dynamic Adaptive Client Behavior
+
+The same client binary can connect to both server platforms. It uses dynamic OS detection via the `os` field in `MSG_HELLO` to adapt its terminal input model to the remote shell backend.
+
+### Windows Client
+
+- **To Linux server:**
+  The client uses the remote Linux PTY as the source of truth for echo and line editing. Local echo is disabled, arrow keys and control sequences are forwarded, and `MSG_WINDOW_SIZE` changes are applied by the server.
+- **To Windows server:**
+  The client enables a local line editor with local echo and history because the remote Windows shell is pipe-based rather than PTY-backed. `MSG_WINDOW_SIZE` packets are still sent, but the server ignores them.
+
+### Linux Client
+
+- **To Linux server:**
+  The client stays in raw terminal pass-through mode. Keystrokes are forwarded character-by-character and the Linux PTY handles canonical editing, full-screen apps, and resize events.
+- **To Windows server:**
+  The client still uses Linux raw terminal mode underneath, but it switches into a Windows-specific local editing path once the server reports `os = "Windows"`. Resize packets continue to be emitted, but the Windows server accepts them without applying a PTY resize.
+
+### RFCOMM Discovery Differences
+
+- **Windows client:**
+  Uses Windows SDP lookup first, then RFCOMM channel scan across `1..12`, then manual entry.
+- **Linux client:**
+  Uses PyBluez SDP lookup when available, then `sdptool`, then RFCOMM channel scan across `1..12`, then manual entry.
+
+### Hello/Feature Caveat
+
+Both server implementations currently advertise `features = ["pty", "signals", "password"]` during `MSG_HELLO`. That is accurate for the Linux server, but only partially accurate for the Windows server. In practice, clients should treat the remote `os` value as the main indicator of whether the session is PTY-backed.
