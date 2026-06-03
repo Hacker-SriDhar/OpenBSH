@@ -1,4 +1,5 @@
 # OpenBSH: Bluetooth Shell
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20526330.svg)](https://doi.org/10.5281/zenodo.20526330)
 
 **OpenBSH** is a robust, cross-platform Bluetooth Shell service. It provides secure, SSH-style remote shell access over Bluetooth RFCOMM, enabling powerful out-of-band management for systems where traditional network access (Wi-Fi, Ethernet) is unavailable, restricted, or compromised.
 
