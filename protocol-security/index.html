@@ -1,0 +1,1486 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Bluetooth Shell Service">
+      
+      
+        <meta name="author" content="BSH Team">
+      
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Protocol & Security - OpenBSH</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#protocol-security" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="OpenBSH" class="md-header__button md-logo" aria-label="OpenBSH" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OpenBSH
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Protocol & Security
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../setup/linux-server/" class="md-tabs__link">
+          
+  
+  
+  Setup
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Protocol & Security
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OpenBSH" class="md-nav__button md-logo" aria-label="OpenBSH" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    OpenBSH
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/linux-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/windows-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol & Security
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol & Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cryptography-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cryptography Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cryptography Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-derivation-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Derivation &amp; Storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wire-encryption-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire Encryption Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wire-protocol-bsh_protocolpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire Protocol (bsh_protocol.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wire Protocol (bsh_protocol.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#packet-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Packet Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#message-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-authentication-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Authentication Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Authentication Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-side-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Side Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#practical-consequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Consequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-adaptive-session-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Adaptive Session Behavior
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dynamic Adaptive Session Behavior">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shared-behavior-across-all-four-pairs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared Behavior Across All Four Pairs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-client-windows-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Client -&gt; Windows Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-client-linux-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Client -&gt; Linux Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-client-windows-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Client -&gt; Windows Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-client-linux-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Client -&gt; Linux Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cryptography-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cryptography Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cryptography Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-derivation-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Derivation &amp; Storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wire-encryption-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire Encryption Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wire-protocol-bsh_protocolpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire Protocol (bsh_protocol.py)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wire Protocol (bsh_protocol.py)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#packet-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Packet Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#message-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-authentication-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Authentication Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Authentication Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-side-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Side Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#practical-consequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Consequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-adaptive-session-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Adaptive Session Behavior
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dynamic Adaptive Session Behavior">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shared-behavior-across-all-four-pairs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared Behavior Across All Four Pairs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-client-windows-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Client -&gt; Windows Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-client-linux-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Client -&gt; Linux Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-client-windows-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Client -&gt; Windows Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-client-linux-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Client -&gt; Linux Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="protocol-security">Protocol &amp; Security</h1>
+<p>OpenBSH relies on a custom wire protocol built directly over Bluetooth RFCOMM. This design ensures that communications remain resilient to Bluetooth frame fragmentation and that packet payloads are encrypted after authentication succeeds.</p>
+<hr />
+<h2 id="cryptography-design">Cryptography Design</h2>
+<p>All BSH traffic is secured using <strong>AES-256-GCM</strong>. This provides both confidentiality and authenticity.</p>
+<h3 id="key-derivation-storage">Key Derivation &amp; Storage</h3>
+<ul>
+<li><strong>PBKDF2 Helper:</strong> The shared crypto module includes a PBKDF2-HMAC-SHA256 helper with a randomly generated salt and <code>100,000</code> iterations. In the current release, neither server uses a standalone BSH password database, so native OS authentication is the active path.</li>
+<li><strong>Session Keys:</strong> The encryption keys used for the data stream are ephemeral. A new 32-byte (256-bit) AES session key is generated securely by the server via <code>os.urandom()</code> upon every successful authentication.</li>
+</ul>
+<h3 id="wire-encryption-format">Wire Encryption Format</h3>
+<p>Once the session key is negotiated via <code>MSG_AUTH_SUCCESS</code>, both the client and server transition to encrypted mode. Every subsequent packet payload is replaced with an AES-GCM envelope.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>| IV (12 bytes) | AES-GCM Ciphertext (Variable) | Auth Tag (16 bytes) |
+</span></code></pre></div>
+<ul>
+<li><strong>IV (Initialization Vector):</strong> A unique 12-byte nonce generated for every packet using <code>os.urandom()</code>.</li>
+<li><strong>Ciphertext:</strong> The fully encrypted original payload.</li>
+<li><strong>Auth Tag:</strong> The 16-byte GCM authentication tag. The receiving side closes the socket if the tag does not validate against the session key.</li>
+</ul>
+<hr />
+<h2 id="wire-protocol-bsh_protocolpy">Wire Protocol (<code>bsh_protocol.py</code>)</h2>
+<p>Because Bluetooth RFCOMM is a continuous stream, OpenBSH implements a custom framing protocol to define packet boundaries.</p>
+<h3 id="packet-structure">Packet Structure</h3>
+<p>Every OpenBSH packet adheres to a strict binary format:</p>
+<pre class="mermaid"><code>packet-beta
+0-7: "SOF (0xAA)"
+8-23: "Length (16-bit, big-endian)"
+24-31: "Type"
+32-39: "Payload byte 0"
+40-47: "Payload byte 1"
+48-55: "..."
+56-63: "Payload byte N-1"
+64-71: "Checksum (XOR)"</code></pre>
+<p>For a payload of length <code>N</code>, the on-wire byte order is:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SOF | LEN_H | LEN_L | TYPE | PAYLOAD[0..N-1] | CHECKSUM
+</span></code></pre></div>
+<ol>
+<li><strong>SOF (Start of Frame):</strong> A fixed byte (<code>0xAA</code>). If the receiver loses sync, it reads byte-by-byte until it finds <code>0xAA</code>.</li>
+<li><strong>Length:</strong> A 16-bit unsigned integer defining exactly how many bytes the payload contains.</li>
+<li><strong>Message Type:</strong> An 8-bit integer defining the purpose of the packet.</li>
+<li><strong>Payload:</strong> The actual data carried by the packet.</li>
+<li><strong>Checksum:</strong> A single-byte XOR checksum over <code>Length + Type + Payload</code>. The SOF byte is intentionally excluded.</li>
+</ol>
+<h3 id="message-types">Message Types</h3>
+<p>The protocol defines the following core message types:</p>
+<table>
+<thead>
+<tr>
+<th>Enum</th>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x01</code></td>
+<td><code>MSG_HELLO</code></td>
+<td>Initial capability and OS exchange.</td>
+</tr>
+<tr>
+<td><code>0x02</code></td>
+<td><code>MSG_DISCONNECT</code></td>
+<td>Clean disconnect request.</td>
+</tr>
+<tr>
+<td><code>0x03</code></td>
+<td><code>MSG_KEEPALIVE</code></td>
+<td>Keepalive packet.</td>
+</tr>
+<tr>
+<td><code>0x07</code></td>
+<td><code>MSG_AUTH_SUCCESS</code></td>
+<td>Server sends authentication success and the AES session key.</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td><code>MSG_AUTH_FAILURE</code></td>
+<td>Server sends an authentication or protocol error.</td>
+</tr>
+<tr>
+<td><code>0x09</code></td>
+<td><code>MSG_AUTH_LOGIN</code></td>
+<td>Client sends username and plaintext password for authentication.</td>
+</tr>
+<tr>
+<td><code>0x10</code></td>
+<td><code>MSG_DATA_IN</code></td>
+<td>Client sends shell input.</td>
+</tr>
+<tr>
+<td><code>0x11</code></td>
+<td><code>MSG_DATA_OUT</code></td>
+<td>Server sends shell stdout.</td>
+</tr>
+<tr>
+<td><code>0x12</code></td>
+<td><code>MSG_DATA_ERR</code></td>
+<td>Server sends shell stderr.</td>
+</tr>
+<tr>
+<td><code>0x15</code></td>
+<td><code>MSG_WINDOW_RESIZE</code></td>
+<td>Alias for <code>MSG_WINDOW_SIZE</code> - client requests a PTY resize. Handled identically to <code>0x21</code> by both Linux and Windows servers.</td>
+</tr>
+<tr>
+<td><code>0x20</code></td>
+<td><code>MSG_INTERRUPT</code></td>
+<td>Client requests a shell interrupt (<code>Ctrl+C</code>).</td>
+</tr>
+<tr>
+<td><code>0x21</code></td>
+<td><code>MSG_WINDOW_SIZE</code></td>
+<td>Client sends terminal size information (<code>rows x cols</code>).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="the-authentication-flow">The Authentication Flow</h2>
+<p>The current wire protocol performs a simplified, single-step authentication. The client prompts for a password and sends a single <code>MSG_AUTH_LOGIN</code> packet containing a JSON payload:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;name&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;plaintext&gt;&quot;</span><span class="p">}</span>
+</span></code></pre></div>
+<h3 id="server-side-authentication">Server-Side Authentication</h3>
+<p>The important behavioral difference is the server OS:</p>
+<ul>
+<li><strong>Linux server:</strong>
+  Verifies credentials via PAM (<code>python-pam</code>). If PAM is unavailable, the server falls back to <code>/etc/shadow</code> directly. The process must run as root to call <code>setuid()</code> and <code>setgid()</code> and impersonate the authenticated user for the shell session.</li>
+<li><strong>Windows server:</strong>
+  Calls <code>LogonUserW</code> via <code>ctypes</code> to validate the credentials against the Windows local account database and obtain a user token. The service must run as <code>LocalSystem</code> to call <code>CreateProcessAsUser</code> with that token.</li>
+</ul>
+<h3 id="practical-consequence">Practical Consequence</h3>
+<ul>
+<li><strong>All stock client pairings use plaintext password submission inside <code>MSG_AUTH_LOGIN</code>.</strong></li>
+<li><strong>The stock client paths all rely on native OS password verification before session encryption starts.</strong></li>
+</ul>
+<p>Important: the current client/server implementation does not perform an extra Diffie-Hellman or RSA exchange before OS authentication. The password is sent in the <code>MSG_AUTH_LOGIN</code> payload before the AES session key becomes active. The surrounding Bluetooth pairing and transport behavior therefore matter to the threat model.</p>
+<hr />
+<h2 id="dynamic-adaptive-session-behavior">Dynamic Adaptive Session Behavior</h2>
+<p>The packet framing, message IDs, and AES-GCM payload format are shared across all supported client/server combinations. The practical differences appear after <code>MSG_HELLO</code>, when the clients dynamically detect the server's <code>os</code> and adapt their input handling model for terminal editing, resize packets, and shell I/O.</p>
+<h3 id="shared-behavior-across-all-four-pairs">Shared Behavior Across All Four Pairs</h3>
+<ul>
+<li>The server sends <code>MSG_HELLO</code> first and the client replies with its own <code>MSG_HELLO</code>.</li>
+<li>The client hello includes <code>name</code> and <code>version</code>.</li>
+<li>The server then expects <code>MSG_AUTH_LOGIN</code> with the <code>username</code> and <code>password</code>.</li>
+<li>The server accepts <code>MSG_AUTH_LOGIN</code>, and if successful, sends <code>MSG_AUTH_SUCCESS</code> with the session key.</li>
+<li>After <code>MSG_AUTH_SUCCESS</code>, both sides encrypt packet payloads with AES-256-GCM.</li>
+<li><code>MSG_KEEPALIVE</code>, <code>MSG_INTERRUPT</code>, and <code>MSG_DISCONNECT</code> are valid on every path.</li>
+</ul>
+<h3 id="windows-client-windows-server">Windows Client -&gt; Windows Server</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant WC as Windows Client
+    participant WS as Windows Server
+
+    WS-&gt;&gt;WC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
+    WC-&gt;&gt;WS: MSG_HELLO {"name":"BSH-Windows-Client"}
+    WC-&gt;&gt;WS: MSG_AUTH_LOGIN {"username":"alice", "password":"&lt;plaintext&gt;"}
+    Note over WS: Server calls LogonUserW(user, password)
+    WS-&gt;&gt;WC: MSG_AUTH_SUCCESS {"session_key":"&lt;hex&gt;"} or MSG_AUTH_FAILURE
+    Note over WC,WS: Post-auth payload encryption begins</code></pre>
+<pre class="mermaid"><code>flowchart LR
+    WC["Windows Client"] --&gt; RF["RFCOMM + BSH Packets"]
+    RF --&gt; WS["Windows Server"]
+    WC --&gt; WCL["Client-side line editor, local echo, history"]
+    WS --&gt; WSS["cmd.exe via pipes, no true PTY"]</code></pre>
+<ul>
+<li>Transport setup:
+  The Windows client uses raw Winsock <code>AF_BTH</code> RFCOMM sockets.</li>
+<li>Channel discovery:
+  It tries Windows SDP lookup first, then scans RFCOMM channels <code>1..12</code>, then falls back to manual channel entry.</li>
+<li>Hello semantics:
+  The Windows server reports <code>os = "Windows"</code> and currently advertises <code>features = ["pty", "signals", "password"]</code>.</li>
+<li>Auth semantics:
+  The current Windows client sends the password in plaintext JSON inside the initial authentication request.</li>
+<li>Server-side verification:
+  The Windows server calls <code>LogonUserW</code> with the provided plaintext password to obtain a Windows token.</li>
+<li>Consequence:
+  This path performs native OS password authentication before AES session encryption begins.</li>
+<li>Important quirk:
+  The Windows server advertises <code>pty</code>, but the actual shell path is pipe-based <code>cmd.exe</code> rather than a true PTY.</li>
+<li>Input model:
+  The Windows client switches to local line editing. Characters are echoed locally, command history is local, and completed lines are sent to the server.</li>
+<li>Output model:
+  The client suppresses the echoed command coming back from the Windows shell because it already rendered that line locally.</li>
+<li>Resize behavior:
+  The client still sends <code>MSG_WINDOW_SIZE</code>, but the Windows server accepts and ignores it.</li>
+<li>Interrupt behavior:
+  <code>MSG_INTERRUPT</code> becomes a <code>^C</code> write to the shell input pipe.</li>
+</ul>
+<h3 id="windows-client-linux-server">Windows Client -&gt; Linux Server</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant WC as Windows Client
+    participant LS as Linux Server
+
+    LS-&gt;&gt;WC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
+    WC-&gt;&gt;LS: MSG_HELLO {"name":"BSH-Windows-Client"}
+    WC-&gt;&gt;LS: MSG_AUTH_LOGIN {"username":"alice", "password":"&lt;plaintext&gt;"}
+    Note over LS: Verify against PAM or /etc/shadow
+    LS-&gt;&gt;WC: MSG_AUTH_SUCCESS {"session_key":"&lt;hex&gt;"} or MSG_AUTH_FAILURE
+    Note over WC,LS: Post-auth payload encryption begins</code></pre>
+<pre class="mermaid"><code>flowchart LR
+    WC["Windows Client"] --&gt; RF["RFCOMM + BSH Packets"]
+    RF --&gt; LS["Linux Server"]
+    WC --&gt; WCP["Raw console input, no local echo"]
+    LS --&gt; LSP["PTY-backed login shell"]</code></pre>
+<ul>
+<li>Transport setup:
+  The Windows client still uses raw Winsock <code>AF_BTH</code> RFCOMM sockets with the same SDP -&gt; scan -&gt; manual fallback flow.</li>
+<li>Hello semantics:
+  The Linux server reports <code>os = "Linux"</code> and advertises <code>features = ["pty", "signals", "password"]</code>.</li>
+<li>Auth semantics:
+  The Linux server expects the password in the <code>MSG_AUTH_LOGIN</code> payload, and the stock Windows client sends it as plaintext JSON.</li>
+<li>Server-side verification:
+  The Linux server verifies the password against PAM or <code>/etc/shadow</code>.</li>
+<li>Consequence:
+  This path still performs native OS password authentication before AES session encryption begins.</li>
+<li>Input model:
+  The Windows client disables local echo and forwards keystrokes toward the remote PTY instead of doing local line editing.</li>
+<li>Output model:
+  The Linux PTY performs canonical editing, echo, and cursor behavior, so the session behaves much closer to SSH.</li>
+<li>Resize behavior:
+  The client sends <code>MSG_WINDOW_SIZE</code> immediately after entering interactive mode and on later console-size changes; the Linux server applies the new size to the PTY.</li>
+<li>Interrupt behavior:
+  <code>MSG_INTERRUPT</code> becomes a PTY-side <code>Ctrl+C</code>.</li>
+</ul>
+<h3 id="linux-client-windows-server">Linux Client -&gt; Windows Server</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant LC as Linux Client
+    participant WS as Windows Server
+
+    WS-&gt;&gt;LC: MSG_HELLO {"os":"Windows","features":["pty","signals","password"]}
+    LC-&gt;&gt;WS: MSG_HELLO {"name":"BSH-Linux-Client"}
+    LC-&gt;&gt;WS: MSG_AUTH_LOGIN {"username":"alice", "password":"&lt;plaintext&gt;"}
+    Note over WS: Server calls LogonUserW(user, password)
+    WS-&gt;&gt;LC: MSG_AUTH_SUCCESS {"session_key":"&lt;hex&gt;"} or MSG_AUTH_FAILURE
+    Note over LC,WS: Post-auth payload encryption begins</code></pre>
+<pre class="mermaid"><code>flowchart LR
+    LC["Linux Client"] --&gt; RF["RFCOMM + BSH Packets"]
+    RF --&gt; WS["Windows Server"]
+    LC --&gt; LCL["Linux terminal raw mode with Windows-specific local editing path"]
+    WS --&gt; WSS["cmd.exe via pipes, no true PTY"]</code></pre>
+<ul>
+<li>Transport setup:
+  The Linux client uses Python <code>socket.AF_BLUETOOTH</code> / <code>BTPROTO_RFCOMM</code>.</li>
+<li>Channel discovery:
+  It tries PyBluez SDP lookup first when available, then <code>sdptool</code>, then RFCOMM channel scan across <code>1..12</code>, then manual entry.</li>
+<li>Hello semantics:
+  The Windows server again reports <code>os = "Windows"</code> and advertises <code>["pty", "signals", "password"]</code>, even though size changes are not applied to a real PTY.</li>
+<li>Auth semantics:
+  The Linux client sends the password as plaintext JSON in the <code>MSG_AUTH_LOGIN</code> payload.</li>
+<li>Server-side verification:
+  The Windows server depends on <code>LogonUserW</code>.</li>
+<li>Consequence:
+  The Linux client's raw terminal behavior does not change the authentication model; this path is still plaintext-password authentication before session encryption starts.</li>
+<li>Input model:
+  Although the Linux client enters terminal raw mode, it does not behave like a pure pass-through session when the remote OS is Windows. It switches into a Windows-specific local editing path with a local buffer and history handling.</li>
+<li>Output model:
+  The remote Windows shell remains pipe-based, so editing fidelity differs from a Linux PTY-backed session.</li>
+<li>Resize behavior:
+  The Linux client sends <code>MSG_WINDOW_SIZE</code> on connect and on <code>SIGWINCH</code>, but the Windows server ignores those packets.</li>
+<li>Interrupt behavior:
+  <code>MSG_INTERRUPT</code> is translated into <code>^C</code> on the server side.</li>
+</ul>
+<h3 id="linux-client-linux-server">Linux Client -&gt; Linux Server</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant LC as Linux Client
+    participant LS as Linux Server
+
+    LS-&gt;&gt;LC: MSG_HELLO {"os":"Linux","features":["pty","signals","password"]}
+    LC-&gt;&gt;LS: MSG_HELLO {"name":"BSH-Linux-Client"}
+    LC-&gt;&gt;LS: MSG_AUTH_LOGIN {"username":"alice", "password":"&lt;plaintext&gt;"}
+    Note over LS: Verify against PAM or /etc/shadow
+    LS-&gt;&gt;LC: MSG_AUTH_SUCCESS {"session_key":"&lt;hex&gt;"} or MSG_AUTH_FAILURE
+    Note over LC,LS: Post-auth payload encryption begins</code></pre>
+<pre class="mermaid"><code>flowchart LR
+    LC["Linux Client"] --&gt; RF["RFCOMM + BSH Packets"]
+    RF --&gt; LS["Linux Server"]
+    LC --&gt; LCP["Raw terminal pass-through"]
+    LS --&gt; LSP["PTY-backed login shell"]</code></pre>
+<ul>
+<li>Transport setup:
+  The Linux client uses Python <code>AF_BLUETOOTH</code> RFCOMM sockets and the PyBluez SDP -&gt; <code>sdptool</code> -&gt; scan -&gt; manual discovery chain.</li>
+<li>Hello semantics:
+  The Linux server reports <code>os = "Linux"</code> and <code>features = ["pty", "signals", "password"]</code>.</li>
+<li>Auth semantics:
+  Even on the most Linux-native path, the stock Linux client still sends plaintext password JSON because the server does not publish salt in the protocol.</li>
+<li>Server-side verification:
+  The Linux server verifies the supplied password against PAM or <code>/etc/shadow</code>.</li>
+<li>Consequence:
+  The current Linux-to-Linux path is operationally plaintext-password auth before AES activation.</li>
+<li>Input model:
+  The Linux client runs in raw terminal mode and forwards keystrokes character-by-character.</li>
+<li>Output model:
+  The Linux PTY handles echo, backspace, cursor motion, line discipline, and full-screen terminal applications.</li>
+<li>Resize behavior:
+  The client sends an initial <code>MSG_WINDOW_SIZE</code> and propagates later terminal resizes; the Linux server applies them with <code>TIOCSWINSZ</code>.</li>
+<li>Interrupt behavior:
+  <code>MSG_INTERRUPT</code> is forwarded to the PTY-backed shell.</li>
+</ul>
+<h3 id="compatibility-matrix">Compatibility Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Pair</th>
+<th>Auth Payload Sent By Stock Client</th>
+<th>Server-Side Auth Reality</th>
+<th>Remote Shell Model</th>
+<th><code>MSG_WINDOW_SIZE</code></th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows client -&gt; Windows server</td>
+<td><code>{"password":"&lt;plaintext&gt;"}</code></td>
+<td><code>LogonUserW</code> token acquisition</td>
+<td><code>cmd.exe</code> via pipes</td>
+<td>Sent, ignored</td>
+<td>Native OS password auth before AES activation</td>
+</tr>
+<tr>
+<td>Windows client -&gt; Linux server</td>
+<td><code>{"password":"&lt;plaintext&gt;"}</code></td>
+<td>PAM or <code>/etc/shadow</code> fallback</td>
+<td>Linux PTY</td>
+<td>Sent, applied</td>
+<td>Native OS password auth before AES activation</td>
+</tr>
+<tr>
+<td>Linux client -&gt; Windows server</td>
+<td><code>{"password":"&lt;plaintext&gt;"}</code></td>
+<td><code>LogonUserW</code> token acquisition</td>
+<td><code>cmd.exe</code> via pipes</td>
+<td>Sent, ignored</td>
+<td>Client OS changes terminal behavior, not auth semantics</td>
+</tr>
+<tr>
+<td>Linux client -&gt; Linux server</td>
+<td><code>{"password":"&lt;plaintext&gt;"}</code></td>
+<td>PAM or <code>/etc/shadow</code> fallback</td>
+<td>Linux PTY</td>
+<td>Sent, applied</td>
+<td>Most complete PTY path, but still plaintext-password auth today</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
