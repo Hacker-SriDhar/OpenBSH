@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - given-names: "Sri Dharanivel A M"
+title: "OpenBSH: Secure SSH-style Remote Shell over Bluetooth RFCOMM"
+version: v1.0
+date-released: 2026-06-03
+url: "https://github.com/Hacker-SriDhar/OpenBSH"
+repository-code: "https://github.com/Hacker-SriDhar/OpenBSH"
+doi: 10.5281/zenodo.20526330
+license: Apache-2.0
+keywords:
+  - bluetooth
+  - remote-access
+  - shell
+  - rfcomm
+  - cryptography
+  - cybersecurity
+  - python
